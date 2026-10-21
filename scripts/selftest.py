@@ -26,7 +26,7 @@ from app.adapters import capabilities  # noqa: E402
 from app.api.routes import _require_enabled  # noqa: E402
 from app.bot import chat_keyboard, chat_link, incoming_from_message  # noqa: E402
 from app.config import Settings  # noqa: E402
-from app.models import Comment, Network, Source  # noqa: E402
+from app.models import Comment, Network, Post, Source  # noqa: E402
 from app.security import validate_init_data  # noqa: E402
 from app.services.identifiers import (
     identifier_condition,
@@ -34,6 +34,7 @@ from app.services.identifiers import (
     parse_identifiers,
     parse_phone,
 )  # noqa: E402
+from app.services.present import card_from_item, comment_card, to_item  # noqa: E402
 from app.services.rubrics import get_rubric_set  # noqa: E402
 from app.services.search import build_tsquery  # noqa: E402
 from app.services.tg_scan import dialog_key  # noqa: E402
@@ -146,6 +147,47 @@ def main() -> int:
     expect(parse_phone("+7 999 123-45-67") is not None, "телефон распознаётся в обычном поиске")
     expect(parse_phone("блокировка кремль") is None, "фраза не считается телефоном")
     expect(build_tsquery("+7 999 123-45-67") is None, "телефон не идёт в полнотекстовый поиск")
+
+    check_title("карточка находки")
+    source = Source(
+        id=1,
+        user_id=1,
+        network=Network.telegram,
+        external_id="1",
+        handle="anna_mentions",
+        title="Соседи",
+        url="https://t.me/anna_mentions",
+    )
+    post = Post(
+        id=2,
+        source_id=1,
+        network=Network.telegram,
+        external_id="452",
+        url="https://t.me/anna_mentions/452",
+        text="пост",
+        published_at=datetime.now(timezone.utc),
+    )
+    comment = Comment(
+        id=3,
+        post_id=2,
+        source_id=1,
+        network=Network.telegram,
+        external_id="777",
+        text="Правильно сделали, что взорвали мост",
+        published_at=datetime.now(timezone.utc),
+        url="https://t.me/anna_mentions/452?comment=777",
+        author_name="Иван",
+        verdict="likely",
+        rubric="205.2",
+        risk_score=0.91,
+        rationale="одобрение подрыва",
+    )
+    item = to_item(comment, source, post, comment.text)
+    expect(item["source"]["url"] == "https://t.me/anna_mentions", "в ответе есть ссылка на чат")
+    bot_card = comment_card(comment, source, post)
+    expect("чат: Соседи" in bot_card, "в карточке бота — ссылка на чат")
+    expect("t.me/anna_mentions/452" in bot_card, "ссылка на сообщение на месте")
+    expect("чат: Соседи" in card_from_item(item), "в карточке из ответа — ссылка на чат")
 
     check_title("initData")
     token = "123456:TEST"

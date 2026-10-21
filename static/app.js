@@ -133,6 +133,14 @@ function openLink(url) {
 function cardHtml(item) {
   const verdict = item.verdict || "pending";
   const url = safeUrl(item.url || item.post?.url);
+  const source = item.source || {};
+  const chatUrl = safeUrl(source.url);
+  const chatTitle = source.title || source.handle || "";
+  const chat = chatUrl
+    ? `<a class="chat-link" href="${esc(chatUrl)}" title="${esc(chatTitle)}">чат: ${esc(
+        chatTitle || shortUrl(chatUrl),
+      )}</a>`
+    : `<span>${esc(chatTitle)}</span>`;
   const why = item.rationale
     ? `<div class="why"><b>почему:</b> ${marked(item.rationale)}</div>`
     : "";
@@ -148,9 +156,9 @@ function cardHtml(item) {
     <p class="quote">«${marked(item.snippet || item.text)}»</p>
     ${why}
     <div class="card-foot">
-      <a href="${esc(url)}" data-link>${esc(shortUrl(url) || "источник")}</a>
+      <a href="${esc(url)}" data-link>${esc(shortUrl(url) || "сообщение")}</a>
       <span class="spacer"></span>
-      <span>${esc(item.source?.title || "")}</span>
+      ${chat}
     </div>
   </article>`;
 }

@@ -402,6 +402,14 @@ details.lookup-group:not([open]) summary.lookup-head::after {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+}
+
+/* Ссылка на чат, где найден комментарий: справа от ссылки на сообщение. */
+.card-foot .chat-link {
+  max-width: 58%;
+  text-align: right;
+  flex: 0 1 auto;
 }
 
 .row-actions {

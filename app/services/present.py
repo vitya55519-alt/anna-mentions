@@ -32,6 +32,14 @@ def link_label(url: str) -> str:
     return url.replace("https://", "").replace("http://", "")
 
 
+def chat_link_html(url: str | None, title: str | None) -> str:
+    """Ссылка на сам чат/канал, где найден комментарий (а не на сообщение)."""
+    label = clip(title or "открыть чат", 42)
+    if not url:
+        return html.escape(label)
+    return f'<a href="{html.escape(url)}">чат: {html.escape(label)}</a>'
+
+
 def to_item(comment: Comment, source: Source, post: Post, snippet: str) -> dict:
     """Единый вид находки для API, бота и поиска по списку."""
     return {
@@ -53,6 +61,7 @@ def to_item(comment: Comment, source: Source, post: Post, snippet: str) -> dict:
             "id": source.id,
             "title": source.title,
             "handle": source.handle,
+            "url": source.url,
             "network": source.network,
             "avatar_url": source.avatar_url,
         },
@@ -86,8 +95,9 @@ def comment_card(
 
     if comment.url:
         parts += ["", f'<a href="{html.escape(comment.url)}">{html.escape(link_label(comment.url))}</a>']
-    else:
-        parts += ["", html.escape(source.title)]
+    # Ссылка на сам чат — отдельно от ссылки на сообщение.
+    if source.url or not comment.url:
+        parts += ["", chat_link_html(source.url, source.title)]
 
     if post and post.text and not comment.url:
         parts += ["", f"<i>{html.escape(clip(post.text, 160))}</i>"]
@@ -112,6 +122,9 @@ def card_from_item(item: dict, *, limit: int = 420) -> str:
         parts += ["", f"<blockquote>почему: {html.escape(clip(rationale, 400))}</blockquote>"]
 
     url = item.get("url") or (item.get("post") or {}).get("url")
+    source = item.get("source") or {}
     if url:
         parts += ["", f'<a href="{html.escape(url)}">{html.escape(link_label(url))}</a>']
+    if source.get("url") or not url:
+        parts += ["", chat_link_html(source.get("url"), source.get("title") or source.get("handle"))]
     return "\n".join(parts)
