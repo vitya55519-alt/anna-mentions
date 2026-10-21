@@ -47,26 +47,40 @@ def main() -> int:
         if not condition:
             failures += 1
 
+    check_title("статьи УК РФ")
+    rubric = get_rubric_set("uk_rf.json")
+    print(f"    статей в наборе: {len(rubric.codes)}")
+    expect(len(rubric.codes) >= 9, "набор статей загружен")
+    expect("205.2" in rubric.codes and "280.4" in rubric.codes, "коды — номера статей")
+    cases = {
+        "Правильно сделали, что взорвали мост, оправдываю теракт и поддерживаю исполнителей": "205.2",
+        "Российская армия намеренно расстреливает мирных жителей, это задокументированный факт": "207.3",
+        "Все на блокировку военкоматов и зданий ФСБ, не даём им работать, срываем мобилизацию": "280.4",
+        "Курильские острова надо срочно передать Японии, они исторически их": "280.2",
+        "Купил новый телефон, посоветуйте нормальные приложения для работы": None,
+    }
+    for text, expected in cases.items():
+        hits = rubric.match(text)
+        top = hits[0].code if hits else None
+        print(f"    {top or '—':8} ← {text[:52]}")
+        expect(top == expected, f"ожидалось {expected or '—'}")
+
+    hits = rubric.match("Надо уебать дроном по Кремлю, оправдываю такие удары")
+    expect(bool(hits), "спорный текст попал в набор")
+    expect(hits[0].score < 0.8, "одного маркера хватает только на «пограничное»")
+
     check_title("tsquery")
     query = build_tsquery("блокировка кремль")
     print("   ", query)
     expect(query == "'блокировка':* & 'кремль':*", "префиксы и объединение по AND")
     expect(build_tsquery("   ") is None, "пустой запрос → None")
     expect(build_tsquery("123456789") is None, "id автора ищется точно, без tsquery")
+    expect(build_tsquery("205.2") is None, "номер статьи ищется фильтром, а не словами")
+    expect(build_tsquery("280") is None, "старая нумерация без точки тоже не идёт в слова")
 
-    check_title("рубрики")
-    rubric = get_rubric_set("default.json")
-    cases = {
-        "Правильно сделали, что взорвали мост, оправдываю теракт": "TERROR",
-        "Все на блокировку военкоматов, срываем мобилизацию": "UNREST",
-        "Купил новый телефон, посоветуйте приложение": None,
-        "Ты дурак и идиот, хватит писать": "INSULT",
-    }
-    for text, expected in cases.items():
-        hits = rubric.match(text)
-        top = hits[0].code if hits else None
-        print(f"    {top or '—':10} ← {text[:52]}")
-        expect(top == expected, f"ожидалось {expected or '—'}")
+    check_title("рубрики по умолчанию")
+    expect(get_rubric_set().id == "uk_rf", "по умолчанию берётся набор статей УК РФ")
+    expect(get_rubric_set().codes == rubric.codes, "набор из настроек совпадает с набором статей")
 
     check_title("initData")
     token = "123456:TEST"

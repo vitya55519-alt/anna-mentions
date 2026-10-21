@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -105,7 +106,7 @@ def _compile_phrase(phrase: str) -> re.Pattern[str]:
     return re.compile(r"\s+".join(words), re.UNICODE)
 
 
-def load_rubric_set(file_name: str = "default.json") -> RubricSet:
+def load_rubric_set(file_name: str = "uk_rf.json") -> RubricSet:
     path = Path(file_name)
     if not path.is_absolute():
         path = RUBRICS_DIR / file_name
@@ -143,11 +144,15 @@ def load_rubric_set(file_name: str = "default.json") -> RubricSet:
 
 
 @lru_cache(maxsize=4)
-def get_rubric_set(file_name: str = "default.json") -> RubricSet:
+def get_rubric_set(file_name: str = "uk_rf.json") -> RubricSet:
     return load_rubric_set(file_name)
 
 
-def rule_rationale(hit: CategoryHit) -> str:
+def rule_rationale(hit: CategoryHit, alternatives: Sequence[CategoryHit] = ()) -> str:
     markers = ", ".join(f"«{marker}»" for marker in hit.markers[:4])
     hint = hit.rationale_hint or hit.title
-    return f"сработали маркеры {markers} — {hint}. Нужна проверка человеком."
+    text = f"сработали маркеры {markers} — {hint}."
+    if alternatives:
+        others = ", ".join(f"{item.code} ({item.score:.2f})" for item in alternatives[:3])
+        text += f" Ближайшие совпадения: {others}."
+    return text + " Предварительная оценка по правилам — нужна проверка юристом."

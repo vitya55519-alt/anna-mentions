@@ -20,6 +20,8 @@ HEADLINE_OPTIONS = literal_column(
 
 TOKEN_RE = re.compile(r'"([^"]*)"|(\S+)')
 WORD_RE = re.compile(r"[^\w#@+-]+", re.UNICODE)
+# 205.2, 280.1 — номер статьи УК РФ: ищем по колонке rubric, а не по словам
+ARTICLE_RE = re.compile(r"\d+\.\d+")
 
 
 @dataclass(slots=True)
@@ -53,8 +55,8 @@ def build_tsquery(raw: str) -> str | None:
     text = (raw or "").strip()
     if not text or text.startswith("@"):
         return None  # @ник ищем по автору, полнотекстовый индекс тут не нужен
-    if text.isdigit():
-        return None  # id автора — точное совпадение, а не поиск по словам
+    if text.isdigit() or ARTICLE_RE.fullmatch(text):
+        return None  # id автора или номер статьи — точное совпадение, а не поиск по словам
 
     parts: list[str] = []
     for phrase, word in TOKEN_RE.findall(text):
@@ -106,13 +108,18 @@ def _text_condition(raw: str, tsquery: str | None):
         )
 
     if text.isdigit():
-        # /find 123456789 — поиск по id автора из Telegram
+        # /find 123456789 — поиск по id автора из Telegram; /find 280 — ещё и статья
         escaped_id = _escape_like(text)
         return or_(
             Comment.author_external_id == text,
+            Comment.rubric == text,
             Comment.author_name.ilike(f"%{escaped_id}%", escape="\\"),
             Comment.text.ilike(f"%{escaped_id}%", escape="\\"),
         )
+
+    if ARTICLE_RE.fullmatch(text):
+        # /find 205.2 — только находки по этой статье, без поиска по словам
+        return Comment.rubric == text
 
     escaped = _escape_like(text)
     conditions = [

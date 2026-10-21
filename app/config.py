@@ -73,7 +73,8 @@ class Settings(BaseSettings):
     enabled_networks: str = "telegram"
 
     # --- Проверка по рубрикам ------------------------------------------------
-    rubrics_file: str = "default.json"
+    # Набор статей УК РФ лежит в rubrics/uk_rf.json; rubrics/default.json — пример формата
+    rubrics_file: str = "uk_rf.json"
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_model: str = "qwen2.5:7b"

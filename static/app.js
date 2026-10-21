@@ -152,9 +152,9 @@ function renderStatus(data) {
 }
 
 function renderChips(data) {
-  const rubricItems = state.rubrics.slice(0, 12);
+  const rubricItems = state.rubrics.slice(0, 16);
   el.rubricChips.innerHTML =
-    `<button class="chip ${state.rubric ? "" : "active"}" data-rubric="">все рубрики</button>` +
+    `<button class="chip ${state.rubric ? "" : "active"}" data-rubric="">все статьи</button>` +
     rubricItems
       .map((rubric) => {
         const count = data?.rubrics?.[rubric.code];

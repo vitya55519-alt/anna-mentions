@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,18 +25,25 @@ MAX_LLM_PER_BATCH = 8
 LLM_CONCURRENCY = 3
 VALID_VERDICTS = {"likely", "borderline", "clean"}
 
-SYSTEM_PROMPT = """Ты — аналитик-модератор комментариев. Тебе дают текст одного комментария
-и список рубрик. Определи, попадает ли комментарий в одну из рубрик.
+SYSTEM_PROMPT = """Ты — аналитик, который предварительно сопоставляет публичные сообщения со статьями УК РФ.
+Тебе дают текст одного сообщения и закрытый список статей: код, название и описание объективной стороны.
 
 Правила:
-- Оценивай только текст комментария, не додумывай контекст.
-- Нужен прямой признак в тексте: призыв, оправдание, утверждение, оскорбление.
-- Ирония, цитата, пересказ чужой позиции или новость без оценки — не попадание.
-- Если ни одна рубрика не подходит, верни code: null и verdict: "clean".
+- Оценивай только текст сообщения, не додумывай контекст и личность автора.
+- Нужен прямой признак в самом тексте: призыв, оправдание, утверждение, оскорбление.
+- Цитата, пересказ чужой позиции, ирония, новость без оценки — не попадание.
+- Выбери не больше одной статьи — ту, чьей объективной стороне текст соответствует сильнее всего.
+- Если признак слабый или решает контекст — verdict "borderline".
+- В reason объясни, почему выбрана эта статья и почему ближайшие по смыслу статьи не подходят.
+- Бери коды только из списка. Ничего не придумывай.
+- Это ориентир для проверки юристом, а не юридическая квалификация — так и формулируй.
+- Если ни одна статья не подходит, верни code: null и verdict: "clean".
 - Ответ — только JSON без пояснений и markdown.
 
 Формат ответа:
-{"code": "КОД_РУБРИКИ" | null, "confidence": 0.0-1.0, "verdict": "likely" | "borderline" | "clean", "reason": "1-2 предложения по-русски: почему именно эта рубрика или почему не попадает"}"""
+{"code": "КОД_СТАТЬИ" | null, "confidence": 0.0-1.0, "verdict": "likely" | "borderline" | "clean", "reason": "1-2 предложения по-русски: почему именно эта статья или почему не попадает"}"""
+
+CODE_RE = re.compile(r"\d+(?:\.\d+)?")
 
 
 def _clamp(value: object, default: float = 0.0) -> float:
@@ -48,13 +56,13 @@ def _clamp(value: object, default: float = 0.0) -> float:
 
 def _llm_user_prompt(rubric: RubricSet, text: str, hits: list[CategoryHit]) -> str:
     categories = "\n".join(
-        f"- {category.code}: {category.title}. {category.description}" for category in rubric.categories
+        f"- {category.code} ({category.title}): {category.description}" for category in rubric.categories
     )
     markers = "; ".join(f"{hit.code}: {', '.join(hit.markers[:3])}" for hit in hits)
     return (
-        f"Рубрики:\n{categories}\n\n"
+        f"Статьи:\n{categories}\n\n"
         f"Маркеры, которые уже нашли правила: {markers or 'нет'}\n\n"
-        f"Комментарий:\n<<<\n{text[:1500]}\n>>>"
+        f"Сообщение:\n<<<\n{text[:1500]}\n>>>"
     )
 
 
@@ -63,7 +71,7 @@ def _apply_rule_result(comment: Comment, hits: list[CategoryHit], now: datetime)
     comment.rubric = top.code
     comment.risk_score = top.score
     comment.verdict = verdict_for(top.score)
-    comment.rationale = rule_rationale(top)
+    comment.rationale = rule_rationale(top, hits[1:])
     comment.analyzed_at = now
     comment.analysis = {
         "engine": "rules",
@@ -86,7 +94,8 @@ async def _refine_with_llm(
     if not payload:
         return
 
-    code = str(payload.get("code") or "").upper() or None
+    code = CODE_RE.search(str(payload.get("code") or ""))
+    code = code.group(0) if code else None
     verdict = str(payload.get("verdict") or "").lower()
     confidence = _clamp(payload.get("confidence"))
     reason = str(payload.get("reason") or "").strip()
@@ -128,7 +137,7 @@ async def analyze_comments(
             comment.verdict = VERDICT_CLEAN
             comment.risk_score = 0.0
             comment.rubric = None
-            comment.rationale = "ни один маркер рубрик не сработал"
+            comment.rationale = "ни один признак проверяемых статей не сработал"
             comment.analyzed_at = now
             comment.analysis = {"engine": "rules", "hits": []}
             continue

@@ -39,7 +39,7 @@ def comment_card(
     *,
     limit: int = 420,
 ) -> str:
-    """Карточка находки в стиле «Коммент-сканера»: рубрика, оценка, текст, почему, ссылка."""
+    """Карточка находки в стиле «Коммент-сканера»: статья, оценка, текст, почему, ссылка."""
     rubric = comment.rubric or "—"
     header = (
         f"<b>{html.escape(rubric)}</b> · {verdict_label(comment.verdict)}"

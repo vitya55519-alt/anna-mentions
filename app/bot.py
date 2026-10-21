@@ -22,6 +22,7 @@ from app.db import SessionLocal
 from app.models import Watch
 from app.services.ingest import IncomingComment, ensure_chat_source, ingest_telegram_message
 from app.services.present import card_from_item
+from app.services.rubrics import get_rubric_set
 from app.services.search import (
     SearchParams,
     build_stats,
@@ -37,7 +38,8 @@ router = Router()
 
 WELCOME = (
     "<b>Коммент-сканер</b>\n"
-    "Собираю сообщения из чатов, куда добавлен бот, и помечаю те, что попадают под рубрики.\n\n"
+    "Собираю сообщения из чатов, куда добавлен бот, и помечаю те, что ориентировочно "
+    "подпадают под статьи УК РФ — с оценкой и объяснением.\n\n"
     "<b>Как подключить чат</b>\n"
     "Добавьте бота в группу или канал. Для групп выключите Privacy Mode в @BotFather, "
     "иначе бот не увидит сообщения.\n\n"
@@ -48,7 +50,7 @@ WELCOME = (
     "/app — открыть приложение кнопкой\n"
     "/diag — проверить настройку\n"
     "/find &lt;запрос&gt; — обычный поиск, например <code>/find блокировка</code>\n"
-    "/art &lt;код&gt; — находки по рубрике, например <code>/art VIOLENCE</code>\n"
+    "/art &lt;статья&gt; — находки по статье, например <code>/art 205.2</code>\n"
     "/csv &lt;запрос&gt; — выгрузка в таблицу\n"
     "/add &lt;слово&gt; — присылать новые сообщения с этим словом\n"
     "/words — список слов\n"
@@ -96,10 +98,20 @@ def chat_keyboard(chat_type: str, **params: str) -> InlineKeyboardMarkup | None:
     return app_keyboard(**params) if chat_type == "private" else None
 
 
+def articles_line() -> str:
+    """Список проверяемых статей — тот же, что в rubrics/uk_rf.json."""
+    try:
+        codes = get_rubric_set(get_settings().rubrics_file).codes
+    except Exception as exc:  # noqa: BLE001 — без файла бот всё равно должен отвечать
+        logger.warning("Не прочитал набор статей: %s", exc)
+        return ""
+    return f"<b>Проверяю статьи УК РФ:</b> {', '.join(codes)}\n\n"
+
+
 def welcome_text() -> str:
     if get_settings().public_webapp_url:
-        return WELCOME
-    return WELCOME + (
+        return articles_line() + WELCOME
+    return articles_line() + WELCOME + (
         "\n\n<b>Приложение не настроено</b>\n"
         "Задайте в переменных worker адрес сервиса — тогда появится кнопка Mini App."
     )
@@ -124,10 +136,15 @@ async def cmd_find(message: Message, command: CommandObject) -> None:
 async def cmd_art(message: Message, command: CommandObject) -> None:
     args = (command.args or "").strip().split(maxsplit=1)
     if not args:
-        await message.answer("Укажите код рубрики: <code>/art VIOLENCE</code>")
+        try:
+            codes = get_rubric_set(get_settings().rubrics_file).codes
+        except Exception:  # noqa: BLE001 — без файла бота всё равно должен отвечать
+            codes = ()
+        hint = f"Доступные: {', '.join(codes)}" if codes else "Например: <code>/art 205.2</code>"
+        await message.answer(f"Укажите номер статьи: <code>/art 205.2</code>\n{hint}")
         return
-    code = args[0].upper()
-    query = args[1] if len(args) > 1 else ""
+    code = args[0].strip().upper()
+    query = args[1].strip() if len(args) > 1 else ""
     await _search(message, query, rubric=code, empty_ok=True)
 
 
@@ -287,7 +304,7 @@ async def cmd_app(message: Message) -> None:
 
     await message.answer(
         "<b>Коммент-сканер</b>\n"
-        "Лента, фильтры по рубрикам и выгрузка — в приложении.",
+        "Лента, фильтры по статьям и выгрузка — в приложении.",
         reply_markup=keyboard,
     )
 
@@ -407,7 +424,7 @@ async def on_bot_membership(event: ChatMemberUpdated, bot: Bot) -> None:
 
     text = (
         f"Подключил чат «{html_escape(source.title)}».\n"
-        "Новые сообщения оттуда попадают в ленту и проверяются по рубрикам."
+        "Новые сообщения оттуда попадают в ленту и проверяются по статьям УК РФ."
     )
     if chat.type in {"group", "supergroup"}:
         text += (
@@ -521,7 +538,7 @@ def create_dispatcher() -> Dispatcher:
 BOT_COMMANDS = [
     BotCommand(command="app", description="Открыть приложение"),
     BotCommand(command="find", description="Найти комментарии"),
-    BotCommand(command="art", description="Находки по рубрике"),
+    BotCommand(command="art", description="Находки по статье УК"),
     BotCommand(command="scan", description="Обойти группы аккаунтов"),
     BotCommand(command="acc", description="Аккаунты и группы"),
     BotCommand(command="diag", description="Проверка настройки"),
@@ -537,6 +554,16 @@ async def setup_bot(bot: Bot) -> None:
     url = settings.public_webapp_url
     try:
         await bot.set_my_commands(BOT_COMMANDS)
+        codes = get_rubric_set(settings.rubrics_file).codes
+        await bot.set_my_description(
+            description=(
+                f"Проверяю сообщения из чатов на признаки статей УК РФ: {', '.join(codes)}. "
+                "Оценка ориентировочная, нужна проверка юристом."
+            )[:512]
+        )
+        await bot.set_my_short_description(
+            short_description="Поиск по сообщениям с оценкой по статьям УК РФ"
+        )
         if url:
             await bot.set_chat_menu_button(
                 menu_button=MenuButtonWebApp(text="Открыть сканер", web_app=WebAppInfo(url=url))
