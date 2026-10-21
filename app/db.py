@@ -31,6 +31,30 @@ async def get_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
+LEGACY_SCHEMA_HINT = (
+    "В базе лежит таблица comments от прежней версии приложения. "
+    "Удалите старые таблицы и перезапустите сервис: "
+    "DROP TABLE IF EXISTS comments, posts, sources, watches, crawl_runs, users CASCADE;"
+)
+
+
+async def _check_schema(conn) -> None:
+    """Ловим несовместимую базу от предыдущей версии — иначе ошибки будут невнятные."""
+    exists = (await conn.execute(text("SELECT to_regclass('public.comments')"))).scalar_one_or_none()
+    if exists is None:
+        return
+    column = (
+        await conn.execute(
+            text(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'comments' AND column_name = 'verdict'"
+            )
+        )
+    ).scalar_one_or_none()
+    if column is None:
+        raise RuntimeError(LEGACY_SCHEMA_HINT)
+
+
 async def init_db() -> None:
     """Создаёт таблицы при первом запуске. Для продакшена достаточно, миграции — через Alembic."""
     from app import models  # noqa: F401  (нужно для регистрации метаданных)
@@ -44,6 +68,7 @@ async def init_db() -> None:
                 "ingest_mode VARCHAR(16) NOT NULL DEFAULT 'crawl'"
             )
         )
+        await _check_schema(conn)
 
 
 async def dispose_db() -> None:
