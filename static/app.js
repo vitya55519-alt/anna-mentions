@@ -5,7 +5,7 @@ const state = {
   network: "",
   rubric: "",
   verdict: "",
-  sort: "date",
+  sort: "relevance",
   offset: 0,
   limit: 20,
   matched: 0,
@@ -24,6 +24,7 @@ const el = {
   empty: $("results-empty"),
   more: $("btn-more"),
   actions: $("search-actions"),
+  sortBtn: $("btn-sort"),
   csv: $("btn-csv"),
   rubricChips: $("rubric-chips"),
   networkChips: $("network-chips"),
@@ -41,6 +42,11 @@ const el = {
   lookupBtn: $("btn-lookup"),
   lookupStatus: $("lookup-status"),
   lookupResults: $("lookup-results"),
+  joinInput: $("join-input"),
+  joinBtn: $("btn-join-import"),
+  joinStatus: $("join-status"),
+  joinList: $("join-list"),
+  joinSummary: $("join-panel")?.querySelector("summary"),
 };
 
 const KINDS = {
@@ -54,6 +60,14 @@ const VERDICTS = {
   borderline: "пограничное",
   clean: "не попадает",
   pending: "не проверено",
+};
+
+const JOIN_STATUSES = {
+  pending: "в очереди",
+  joined: "подключён",
+  exists: "уже был",
+  error: "ошибка",
+  cancelled: "отменён",
 };
 
 const esc = (value) =>
@@ -165,8 +179,13 @@ function cardHtml(item) {
 
 function renderStatus(data) {
   const seconds = (data.took_ms / 1000).toFixed(1).replace(".", ",");
-  el.status.textContent =
-    `Готово за ${seconds} с · проверено ${data.checked} · совпадений ${data.matched}`;
+  const note = data.fallback ? " · точных нет, показаны по отдельным словам" : "";
+  el.status.textContent = `Готово за ${seconds} с · проверено ${data.checked} · совпадений ${data.matched}${note}`;
+}
+
+function renderSortLabel() {
+  el.sortBtn.textContent =
+    state.sort === "relevance" ? "сортировка: по точности" : "сортировка: по дате";
 }
 
 function lookupGroup(group, index) {
@@ -435,6 +454,92 @@ async function loadSources() {
   }
 }
 
+function joinTaskHtml(task) {
+  const label = JOIN_STATUSES[task.status] || task.status;
+  const tone = task.status === "joined" || task.status === "exists" ? "clean" : task.status === "error" ? "likely" : "";
+  const account = task.account_index ? `аккаунт ${task.account_index}` : "ждёт аккаунт";
+  const group = task.group_joined ? " · с группой обсуждения" : "";
+  const meta = task.error
+    ? esc(task.error)
+    : `${account}${group}${task.attempts > 1 ? ` · попыток ${task.attempts}` : ""}`;
+  const cancel = task.status === "pending"
+    ? `<button class="link-btn" data-join-cancel="${task.id}">отменить</button>`
+    : "";
+  return `<div class="join-task">
+    <span class="ref" title="${esc(task.ref)}">${esc(task.ref)}</span>
+    <span class="badge ${tone}">${esc(label)}</span>
+    <span class="meta" title="${meta}">${meta}</span>
+    ${cancel}
+  </div>`;
+}
+
+async function loadJoins() {
+  try {
+    const data = await api("/api/sources/import");
+    const pending = data.counts.pending || 0;
+    const joined = (data.counts.joined || 0) + (data.counts.exists || 0);
+    const today = Object.values(data.joined_today || {}).reduce((sum, value) => sum + value, 0);
+    if (!data.accounts) {
+      el.joinStatus.textContent = "Аккаунты-сборщики не настроены: нужны TG_SESSION_1..3";
+    } else {
+      const limit = data.daily_limit * data.accounts;
+      el.joinStatus.textContent = `В очереди: ${pending} · подключено: ${joined} · сегодня: ${today} из ${limit} слотов`;
+    }
+    if (el.joinSummary) {
+      let label = "Массовое подключение";
+      if (pending) label += ` · ${pending} в очереди`;
+      else if (data.counts.error) label += ` · ошибок: ${data.counts.error}`;
+      el.joinSummary.textContent = label;
+    }
+    el.joinList.innerHTML = data.tasks.length
+      ? data.tasks.slice(0, 20).map(joinTaskHtml).join("")
+      : `<p class="muted">Очередь пуста.</p>`;
+  } catch (error) {
+    el.joinStatus.textContent = error.message;
+  }
+}
+
+async function importJoins() {
+  const text = el.joinInput.value.trim();
+  if (!text) {
+    toast("Вставьте хотя бы одну ссылку");
+    return;
+  }
+
+  el.joinBtn.disabled = true;
+  el.joinBtn.textContent = "Ставлю в очередь…";
+  try {
+    const result = await api("/api/sources/import", {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+    el.joinInput.value = "";
+    const parts = [`В очереди: ${result.queued}`];
+    if (result.skipped) parts.push(`пропущено: ${result.skipped}`);
+    if (result.invalid?.length) parts.push(`не разобрал: ${result.invalid.length}`);
+    toast(parts.join(" · "));
+    await loadJoins();
+    haptic("medium");
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    el.joinBtn.disabled = false;
+    el.joinBtn.textContent = "Поставить в очередь";
+  }
+}
+
+async function handleJoinAction(event) {
+  const button = event.target.closest("[data-join-cancel]");
+  if (!button) return;
+  try {
+    await api(`/api/sources/import/${button.dataset.joinCancel}`, { method: "DELETE" });
+    await loadJoins();
+    haptic();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 async function handleSourceAction(event) {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
@@ -571,6 +676,7 @@ function switchView(name) {
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.view === name);
   });
+  if (name === "sources") loadJoins();
   haptic();
 }
 
@@ -598,13 +704,19 @@ function bindUi() {
   });
 
   el.more.addEventListener("click", loadMore);
+  el.sortBtn.addEventListener("click", () => {
+    state.sort = state.sort === "relevance" ? "date" : "relevance";
+    renderSortLabel();
+    runSearch(true);
+    haptic();
+  });
   el.csv.addEventListener("click", downloadCsv);
   el.lookupBtn.addEventListener("click", runLookup);
   el.lookupInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) runLookup();
   });
   $("btn-refresh").addEventListener("click", async () => {
-    await Promise.all([loadStats(), loadSources()]);
+    await Promise.all([loadStats(), loadSources(), loadJoins()]);
     await runSearch(true);
     toast("Обновлено");
   });
@@ -624,6 +736,8 @@ function bindUi() {
   });
 
   $("btn-source-save").addEventListener("click", addSource);
+  el.joinBtn.addEventListener("click", importJoins);
+  el.joinList.addEventListener("click", handleJoinAction);
   el.addToChat.addEventListener("click", addBotToChat);
   el.sources.addEventListener("click", handleSourceAction);
   el.watchForm.addEventListener("submit", addWatch);
@@ -667,7 +781,8 @@ async function boot() {
 
   await Promise.all([loadRubrics(), loadCaps(), loadMe()]);
   renderChips(null);
-  await Promise.all([loadStats(), runSearch(true), loadSources(), loadWatches()]);
+  renderSortLabel();
+  await Promise.all([loadStats(), runSearch(true), loadSources(), loadWatches(), loadJoins()]);
 }
 
 boot();

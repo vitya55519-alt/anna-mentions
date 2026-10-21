@@ -12,6 +12,7 @@ import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlencode
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -26,7 +27,7 @@ from app.adapters import capabilities  # noqa: E402
 from app.api.routes import _require_enabled  # noqa: E402
 from app.bot import chat_keyboard, chat_link, incoming_from_message  # noqa: E402
 from app.config import Settings  # noqa: E402
-from app.models import Comment, Network, Post, Source  # noqa: E402
+from app.models import Comment, JoinTask, Network, Post, Source  # noqa: E402
 from app.security import validate_init_data  # noqa: E402
 from app.services.identifiers import (
     identifier_condition,
@@ -34,9 +35,10 @@ from app.services.identifiers import (
     parse_identifiers,
     parse_phone,
 )  # noqa: E402
+from app.services.join_queue import discussion_target, parse_ref, parse_refs  # noqa: E402
 from app.services.present import card_from_item, comment_card, to_item  # noqa: E402
 from app.services.rubrics import get_rubric_set  # noqa: E402
-from app.services.search import build_tsquery  # noqa: E402
+from app.services.search import build_tsquery, relax_tsquery  # noqa: E402
 from app.services.tg_scan import dialog_key  # noqa: E402
 
 OK = "ok"
@@ -85,6 +87,12 @@ def main() -> int:
     expect(build_tsquery("123456789") is None, "id автора ищется точно, без tsquery")
     expect(build_tsquery("205.2") is None, "номер статьи ищется фильтром, а не словами")
     expect(build_tsquery("280") is None, "старая нумерация без точки тоже не идёт в слова")
+    expect(build_tsquery("#нетвойне") == "'нетвойне':*", "решётка не мешает полнотекстовому поиску")
+    phrase = build_tsquery('"блокировка кремль"')
+    print("   ", phrase)
+    expect(" <-> " in phrase, "в кавычках — только соседние слова")
+    expect(relax_tsquery(query) == "'блокировка':* | 'кремль':*", "запасной вариант — через OR")
+    expect(relax_tsquery("'блокировка':*") is None, "одно слово расслаблять не нужно")
 
     check_title("рубрики по умолчанию")
     expect(get_rubric_set().id == "uk_rf", "по умолчанию берётся набор статей УК РФ")
@@ -260,12 +268,49 @@ def main() -> int:
     expect(not Settings(tg_session_1="a").tg_accounts_ready, "без api_id сборщик выключен")
     expect(dialog_key(-1001234567890) == "dialog:-1001234567890", "ключ группы в базе")
 
+    check_title("массовое подключение")
+    public = parse_ref("https://t.me/Some_Group")
+    expect(
+        public is not None and public.kind == "public" and public.value == "some_group",
+        "ссылка на канал нормализуется",
+    )
+    invite = parse_ref("t.me/+AbCdEf123456")
+    expect(invite is not None and invite.kind == "invite", "ссылка-приглашение распознаётся")
+    expect(invite is not None and invite.ref == "t.me/+AbCdEf123456", "регистр хеша приглашения сохраняется")
+    in_text = parse_ref("канал (https://t.me/some_group)")
+    expect(in_text is not None and in_text.value == "some_group", "ссылка в скобках не ломается")
+    post = parse_ref("https://t.me/some_group/123")
+    expect(post is not None and post.value == "some_group", "ссылка на пост ведёт в канал")
+    at_name = parse_ref("@some_group")
+    expect(at_name is not None and at_name.ref == "t.me/some_group", "юзернейм без ссылки")
+    refs, invalid = parse_refs("t.me/one_group\nt.me/two_group, t.me/one_group\n1. t.me/three_group\nпросто")
+    expect(len(refs) == 3, "повторы и нумерация не мешают")
+    expect(invalid == ["просто"], "непонятный кусок показан отдельно")
+    expect(Settings.model_fields["join_daily_limit"].default == 20, "квота вступлений по умолчанию")
+    expect(
+        Settings.model_fields["join_discussion_groups"].default is True,
+        "автоподключение групп обсуждения включено",
+    )
+    expect(
+        discussion_target(SimpleNamespace(broadcast=True, linked_chat_id=42)) == 42,
+        "у канала находится группа обсуждения",
+    )
+    expect(
+        discussion_target(SimpleNamespace(broadcast=False, linked_chat_id=42)) is None,
+        "у группы нет вложенной группы обсуждения",
+    )
+
     check_title("DDL")
     ddl = str(CreateTable(Comment.__table__).compile(dialect=postgresql.dialect()))
     expect("to_tsvector" in ddl, "вычисляемая колонка search_tsv")
     expect("verdict" in ddl and "risk_score" in ddl, "поля вердикта")
     sources_ddl = str(CreateTable(Source.__table__).compile(dialect=postgresql.dialect()))
     expect("ingest_mode" in sources_ddl, "режим наполнения источника")
+    joins_ddl = str(CreateTable(JoinTask.__table__).compile(dialect=postgresql.dialect()))
+    expect(
+        "status" in joins_ddl and "next_at" in joins_ddl and "group_joined" in joins_ddl,
+        "очередь вступления в чаты и учёт группы обсуждения",
+    )
 
     print(f"\nИтого: {'всё ок' if failures == 0 else f'{failures} провал(ов)'}")
     return 0 if failures == 0 else 1

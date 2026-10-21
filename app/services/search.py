@@ -41,7 +41,7 @@ class SearchParams:
 
 
 def _escape_token(token: str) -> str:
-    cleaned = WORD_RE.sub("", token).strip()
+    cleaned = WORD_RE.sub("", token).strip().lstrip("#@")
     if not cleaned:
         return ""
     return "'" + cleaned.replace("\\", "\\\\") + "'"
@@ -64,7 +64,8 @@ def build_tsquery(raw: str) -> str | None:
         if phrase:
             items = [item for item in (_escape_token(t) for t in phrase.split()) if item]
             if len(items) > 1:
-                parts.append(" & ".join(items))
+                # В кавычках — только рядом стоящие слова: 'блокировка' <-> 'кремль'
+                parts.append(" <-> ".join(item + ":*" for item in items))
             elif items:
                 parts.append(items[0] + ":*")
         elif word:
@@ -72,6 +73,14 @@ def build_tsquery(raw: str) -> str | None:
             if token:
                 parts.append(token + ":*")
     return " & ".join(parts) if parts else None
+
+
+def relax_tsquery(tsquery: str | None) -> str | None:
+    """Запасной вариант: те же слова через «или», когда по всем сразу пусто."""
+    if not tsquery:
+        return None
+    relaxed = tsquery.replace(" <-> ", " | ").replace(" & ", " | ")
+    return relaxed if relaxed != tsquery else None
 
 
 def _base_conditions(user_id: int, params: SearchParams, skip: frozenset[str] = frozenset()):
@@ -127,6 +136,11 @@ def _text_condition(raw: str, tsquery: str | None):
         # /find 205.2 — только находки по этой статье, без поиска по словам
         return Comment.rubric == text
 
+    if tsquery and len(text) < 3:
+        # Один-два символа: у trigram-индекса нет триграмм, ILIKE пойдёт
+        # по всей таблице. Префиксный полнотекстовый поиск и так найдёт слово.
+        return Comment.search_tsv.op("@@")(func.to_tsquery(TS_CONFIG, tsquery))
+
     escaped = _escape_like(text)
     conditions = [
         Comment.text.ilike(f"%{escaped}%", escape="\\"),
@@ -157,13 +171,27 @@ async def search_comments(
     params: SearchParams,
 ) -> dict:
     started = time.perf_counter()
-    tsquery = build_tsquery(params.query)
-    text_condition = _text_condition(params.query, tsquery)
+    query = (params.query or "").strip()[:200]
+    tsquery = build_tsquery(query)
+    text_condition = _text_condition(query, tsquery)
 
     base = _base_conditions(user_id, params)
     full = list(base) + ([text_condition] if text_condition is not None else [])
     matched = await _count(session, full)
-    checked = await _count(session, base) if params.query else matched
+    fallback = False
+
+    # Строгий AND ничего не нашёл — пробуем те же слова через OR.
+    # Лучше показать частичные совпадения, чем пустой экран.
+    relaxed = relax_tsquery(tsquery)
+    if matched == 0 and relaxed:
+        relaxed_condition = _text_condition(query, relaxed)
+        relaxed_full = list(base) + ([relaxed_condition] if relaxed_condition is not None else [])
+        relaxed_matched = await _count(session, relaxed_full)
+        if relaxed_matched:
+            tsquery, text_condition, full, matched = relaxed, relaxed_condition, relaxed_full, relaxed_matched
+            fallback = True
+
+    checked = await _count(session, base) if query else matched
 
     tsq = func.to_tsquery(TS_CONFIG, tsquery) if tsquery else None
     snippet = (
@@ -179,11 +207,16 @@ async def search_comments(
         .where(and_(*full))
     )
     if tsq is not None and params.sort == "relevance":
-        stmt = stmt.order_by(func.ts_rank(Comment.search_tsv, tsq).desc(), Comment.published_at.desc())
+        # ts_rank_cd учитывает близость слов, дата и id — для стабильной выдачи
+        stmt = stmt.order_by(
+            func.ts_rank_cd(Comment.search_tsv, tsq).desc(),
+            Comment.published_at.desc(),
+            Comment.id.desc(),
+        )
     elif params.sort == "score":
-        stmt = stmt.order_by(Comment.risk_score.desc(), Comment.published_at.desc())
+        stmt = stmt.order_by(Comment.risk_score.desc(), Comment.published_at.desc(), Comment.id.desc())
     else:
-        stmt = stmt.order_by(Comment.published_at.desc())
+        stmt = stmt.order_by(Comment.published_at.desc(), Comment.id.desc())
 
     rows = (await session.execute(stmt.limit(params.limit).offset(params.offset))).all()
 
@@ -224,7 +257,8 @@ async def search_comments(
         "took_ms": int((time.perf_counter() - started) * 1000),
         "facets": {str(network): int(count) for network, count in facet_rows},
         "rubrics": {str(code): int(count) for code, count in rubric_rows},
-        "query": params.query,
+        "query": query,
+        "fallback": fallback,
     }
 
 

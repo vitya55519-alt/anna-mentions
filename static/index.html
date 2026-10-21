@@ -39,6 +39,7 @@
         </div>
         <button class="ghost wide hidden" id="btn-more" type="button">Показать остальные</button>
         <div class="row-actions hidden" id="search-actions">
+          <button class="link-btn" id="btn-sort" type="button">сортировка: по точности</button>
           <button class="link-btn" id="btn-csv" type="button">экспорт /csv</button>
         </div>
       </section>
@@ -62,6 +63,20 @@
           <h2>Источники</h2>
           <button class="primary small" id="btn-add-source" type="button">Добавить</button>
         </div>
+        <details class="join-panel" id="join-panel">
+          <summary>Массовое подключение</summary>
+          <p class="hint">
+            Ссылки <code>t.me/…</code> — по одной в строке. Аккаунты вступают постепенно,
+            чтобы не ловить лимиты Telegram. Если у канала есть привязанная группа
+            обсуждения, очередь попробует вступить и в неё: комментарии живут именно там.
+            Закрытую группу добавьте отдельной ссылкой.
+          </p>
+          <textarea class="lookup-input" id="join-input" rows="4" spellcheck="false"
+            placeholder="t.me/group_one&#10;t.me/+invite_hash"></textarea>
+          <button class="primary wide" id="btn-join-import" type="button">Поставить в очередь</button>
+          <div class="status" id="join-status"></div>
+          <div class="list join-list" id="join-list"></div>
+        </details>
         <div class="list" id="sources-list"></div>
         <div class="caps" id="caps-list"></div>
       </section>

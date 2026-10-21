@@ -15,6 +15,9 @@ from app.config import get_settings
 from app.models import Network, Source, Watch
 from app.schemas import (
     IdentifierGroupOut,
+    JoinImportIn,
+    JoinImportOut,
+    JoinQueueOut,
     LookupIn,
     LookupOut,
     MeOut,
@@ -31,6 +34,11 @@ from app.schemas import (
     WatchOut,
 )
 from app.services.identifiers import lookup_identifiers
+from app.services.join_queue import (
+    cancel_join_task,
+    enqueue_join_tasks,
+    join_queue_snapshot,
+)
 from app.services.rubrics import get_rubric_set
 from app.services.search import (
     SearchParams,
@@ -38,6 +46,7 @@ from app.services.search import (
     export_csv,
     search_comments,
 )
+from app.services.tg_scan import resolve_owner
 
 router = APIRouter(prefix="/api")
 logger = logging.getLogger(__name__)
@@ -125,6 +134,60 @@ async def resolve_source(payload: SourceResolveIn, _: CurrentUser) -> ResolvedSo
     except AdapterError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return ResolvedSource(**asdict(resolved))
+
+
+@router.post("/sources/import", response_model=JoinImportOut)
+async def import_sources(
+    payload: JoinImportIn,
+    user: CurrentUser,
+    session: SessionDep,
+) -> JoinImportOut:
+    """Ставит список ссылок в очередь: аккаунты вступят в чаты постепенно."""
+    settings = get_settings()
+    if not settings.join_queue_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Массовое подключение выключено: JOIN_QUEUE_ENABLED=false",
+        )
+    if not settings.tg_accounts_ready:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Нужны аккаунты-сборщики: TG_API_ID, TG_API_HASH и TG_SESSION_1..3",
+        )
+    owner = await resolve_owner(session, settings)
+    if owner is not None and owner.id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Массовое подключение доступно владельцу аккаунтов",
+        )
+    result = await enqueue_join_tasks(
+        session,
+        user,
+        payload.text,
+        limit=settings.join_queue_limit,
+    )
+    return JoinImportOut(**result)
+
+
+@router.get("/sources/import", response_model=JoinQueueOut)
+async def import_status(user: CurrentUser, session: SessionDep) -> JoinQueueOut:
+    snapshot = await join_queue_snapshot(session, user.id)
+    settings = get_settings()
+    return JoinQueueOut(
+        **snapshot,
+        daily_limit=settings.join_daily_limit,
+        accounts=len(settings.tg_sessions) if settings.tg_accounts_ready else 0,
+    )
+
+
+@router.delete("/sources/import/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_import(task_id: int, user: CurrentUser, session: SessionDep) -> Response:
+    if not await cancel_join_task(session, user.id, task_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Задача не найдена или уже выполняется",
+        )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/sources", response_model=SourceOut, status_code=status.HTTP_201_CREATED)

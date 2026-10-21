@@ -153,7 +153,10 @@ async def discover_dialogs(session: AsyncSession, settings: Settings, pool: Acco
         connected += 1
 
         try:
-            async for dialog in client.iter_dialogs(limit=settings.tg_scan_dialogs_limit):
+            # Лимит считаем по группам и каналам, а не по всем диалогам:
+            # личные переписки не должны съедать квоту в 500 чатов на аккаунт.
+            scanned = 0
+            async for dialog in client.iter_dialogs():
                 entity = dialog.entity
                 entity_id = getattr(entity, "id", None)
                 if entity_id is None:
@@ -170,6 +173,7 @@ async def discover_dialogs(session: AsyncSession, settings: Settings, pool: Acco
                     continue
                 seen.add(key)
                 dialogs_total += 1
+                scanned += 1
 
                 _, created_now = await ensure_dialog_source(
                     session,
@@ -180,6 +184,9 @@ async def discover_dialogs(session: AsyncSession, settings: Settings, pool: Acco
                 )
                 created += int(created_now)
                 await asyncio.sleep(0.05)
+
+                if settings.tg_scan_dialogs_limit and scanned >= settings.tg_scan_dialogs_limit:
+                    break
         except Exception as exc:  # noqa: BLE001
             logger.warning("%s: не удалось прочитать диалоги: %s", account.label, exc)
 

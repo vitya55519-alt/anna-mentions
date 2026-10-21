@@ -67,6 +67,41 @@ class SourceCreateIn(BaseModel):
     crawl_interval_minutes: int | None = Field(default=None, ge=10, le=1440)
 
 
+class JoinImportIn(BaseModel):
+    # Ссылки t.me/… как есть: строки, пробелы, запятые — разберём на сервере.
+    text: str = Field(min_length=1, max_length=50_000)
+
+
+class JoinTaskOut(BaseModel):
+    id: int
+    ref: str
+    kind: str
+    status: str
+    account_index: int | None = None
+    attempts: int = 0
+    error: str | None = None
+    source_id: int | None = None
+    group_joined: bool = False
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class JoinImportOut(BaseModel):
+    queued: int
+    skipped: int
+    invalid: list[str] = Field(default_factory=list)
+    total_pending: int
+
+
+class JoinQueueOut(BaseModel):
+    tasks: list[JoinTaskOut]
+    counts: dict[str, int]
+    joined_today: dict[str, int]
+    pending: int
+    daily_limit: int
+    accounts: int
+
+
 class SourcePatchIn(BaseModel):
     is_active: bool | None = None
     crawl_interval_minutes: int | None = Field(default=None, ge=10, le=1440)
@@ -118,6 +153,8 @@ class SearchOut(BaseModel):
     facets: dict[str, int]
     rubrics: dict[str, int]
     query: str = ""
+    # Точных совпадений по всем словам не было — показаны частичные.
+    fallback: bool = False
 
 
 class LookupIn(BaseModel):

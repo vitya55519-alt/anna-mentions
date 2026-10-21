@@ -175,6 +175,39 @@ class Watch(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class JoinTask(Base):
+    """Ссылка на чат, в который нужно вступить аккаунту-сборщику."""
+
+    __tablename__ = "join_tasks"
+    __table_args__ = (
+        UniqueConstraint("user_id", "ref", name="uq_join_tasks_user_ref"),
+        Index("ix_join_tasks_due", "status", "next_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # Нормализованная ссылка: t.me/name или t.me/+invite_hash.
+    ref: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[str] = mapped_column(String(16), default="public", server_default="public")
+    # pending / joined / exists / error / cancelled
+    status: Mapped[str] = mapped_column(String(16), default="pending", server_default="pending")
+    account_index: Mapped[int | None] = mapped_column(Integer)
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id", ondelete="SET NULL"))
+    # Вместе с каналом вступили в его группу обсуждения: занимает второй слот квоты.
+    group_joined: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    next_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class CrawlRun(Base):
     __tablename__ = "crawl_runs"
 

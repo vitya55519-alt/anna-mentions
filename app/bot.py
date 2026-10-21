@@ -549,9 +549,12 @@ async def _search(
         result = await search_comments(session, user.id, params)
 
     seconds = max(1, round(result["took_ms"] / 1000))
+    note = ""
+    if result.get("fallback"):
+        note = " Точных совпадений по всем словам нет — показал по отдельным."
     await message.answer(
         f"Готово за {seconds} с. Проверено {result['checked']} сообщений, "
-        f"совпадений — {result['matched']}."
+        f"совпадений — {result['matched']}.{note}"
     )
 
     if not result["items"]:

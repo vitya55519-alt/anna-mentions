@@ -14,6 +14,7 @@ from app.bot import create_dispatcher, setup_bot
 from app.config import get_settings
 from app.db import SessionLocal, dispose_db, init_db
 from app.services.crawl import claim_due_sources, notify_matches, sync_source
+from app.services.join_queue import process_join_tasks
 from app.services.tg_accounts import AccountPool, get_pool
 from app.services.tg_scan import discover_dialogs, resolve_owner, scan_source
 
@@ -82,6 +83,25 @@ async def discovery_loop(pool: AccountPool, stop: asyncio.Event) -> None:
             await asyncio.wait_for(stop.wait(), timeout=max(1, wait_minutes) * 60)
 
 
+async def join_loop(pool: AccountPool, stop: asyncio.Event) -> None:
+    """Постепенно вступает в чаты из очереди, не больше одного за подход."""
+    settings = get_settings()
+    logger.info(
+        "Очередь вступления работает: до %s чатов на аккаунт в сутки, пауза %s с",
+        settings.join_daily_limit,
+        settings.join_pause_seconds,
+    )
+    while not stop.is_set():
+        processed = 0
+        try:
+            processed = await process_join_tasks(settings, pool)
+        except Exception:  # noqa: BLE001 — цикл не должен умирать
+            logger.exception("Сбой очереди вступления")
+        timeout = settings.join_pause_seconds if processed else 20
+        with suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(stop.wait(), timeout=max(5, timeout))
+
+
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -94,6 +114,7 @@ async def main() -> None:
     bot: Bot | None = None
     polling: asyncio.Task | None = None
     discovery: asyncio.Task | None = None
+    joining: asyncio.Task | None = None
     pool = get_pool(settings)
     stop = asyncio.Event()
 
@@ -102,6 +123,9 @@ async def main() -> None:
         discovery = asyncio.create_task(discovery_loop(pool, stop), name="tg-discovery")
     else:
         logger.info("Аккаунты не заданы — сканирование групп выключено")
+
+    if settings.join_queue_enabled and pool.ready():
+        joining = asyncio.create_task(join_loop(pool, stop), name="tg-join")
 
     if settings.bot_token:
         bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
@@ -135,6 +159,10 @@ async def main() -> None:
             discovery.cancel()
             with suppress(asyncio.CancelledError):
                 await discovery
+        if joining is not None:
+            joining.cancel()
+            with suppress(asyncio.CancelledError):
+                await joining
         if polling is not None:
             polling.cancel()
             with suppress(asyncio.CancelledError):

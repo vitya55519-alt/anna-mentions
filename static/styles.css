@@ -415,6 +415,7 @@ details.lookup-group:not([open]) summary.lookup-head::after {
 .row-actions {
   display: flex;
   justify-content: center;
+  gap: 20px;
   padding: 10px 0 4px;
 }
 
@@ -436,6 +437,88 @@ details.lookup-group:not([open]) summary.lookup-head::after {
   color: var(--muted);
   font-size: 13px;
   margin: 0 0 12px;
+}
+
+/* Очередь массового подключения: свёрнута, чтобы не мешать списку источников. */
+.join-panel {
+  margin-bottom: 14px;
+  padding: 11px 13px 13px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+
+.join-panel > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.join-panel > summary::-webkit-details-marker {
+  display: none;
+}
+
+.join-panel > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 8px;
+  color: var(--muted);
+  transition: transform 0.15s;
+}
+
+.join-panel[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.join-panel[open] > summary {
+  margin-bottom: 10px;
+}
+
+.join-panel .hint {
+  margin-top: 0;
+}
+
+#join-input {
+  min-height: 96px;
+}
+
+.join-task {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg);
+}
+
+.join-task .ref {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+
+.join-task .badge {
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.join-task .meta {
+  grid-column: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.join-task .link-btn {
+  grid-column: 2;
+  justify-self: end;
+  white-space: nowrap;
 }
 
 .section-head {
@@ -540,9 +623,10 @@ details.lookup-group:not([open]) summary.lookup-head::after {
 }
 
 .watch {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
+  gap: 6px 10px;
   padding: 12px 14px;
   border-radius: 14px;
   background: var(--surface);
@@ -551,10 +635,24 @@ details.lookup-group:not([open]) summary.lookup-head::after {
 
 .watch strong {
   font-size: 14.5px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.watch .badge,
+.watch .muted,
+.watch .link-btn {
+  white-space: nowrap;
+}
+
+.watch .badge,
+.watch .link-btn {
+  justify-self: end;
 }
 
 .watch .muted {
-  margin-left: auto;
+  font-size: 12.5px;
 }
 
 .tabbar {
