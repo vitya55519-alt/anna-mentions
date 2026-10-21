@@ -1,122 +1,101 @@
-"""Worker-сервис.
+from __future__ import annotations
 
-Делает две вещи:
-  1) Telegram-бот (long polling) — принимает комментарии из групп
-     обсуждения, где бот состоит (комменты под постами ТВОЕГО канала),
-     и сохраняет их в ленту. Плюс отвечает на /start и /id.
-  2) Планировщик — периодически опрашивает ВК по ключевым словам
-     продукта (brand monitoring).
-
-Оба механизма защищены: нет токена — соответствующая часть просто
-логирует это и не падает, чтобы сервис поднимался даже до настройки.
-"""
 import asyncio
 import logging
+import signal
+from contextlib import suppress
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
-from . import config, db
-from .collectors import vk
+from app.adapters import close_adapters
+from app.bot import create_dispatcher, setup_bot
+from app.config import get_settings
+from app.db import SessionLocal, dispose_db, init_db
+from app.services.crawl import claim_due_sources, notify_matches, sync_source
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
-log = logging.getLogger("worker")
-
-
-def _msg_link(chat, message_id: int) -> str | None:
-    username = getattr(chat, "username", None)
-    if username:
-        return f"https://t.me/{username}/{message_id}"
-    chat_id = getattr(chat, "id", None)
-    if chat_id is not None and str(chat_id).startswith("-100"):
-        internal = str(chat_id)[4:]
-        return f"https://t.me/c/{internal}/{message_id}"
-    return None
+logger = logging.getLogger("app.worker")
 
 
-async def run_bot() -> None:
-    if not config.BOT_TOKEN:
-        log.info("BOT_TOKEN не задан — Telegram-бот не запускается (жду токен)")
-        return
+async def crawl_cycle(bot: Bot | None, limit: int = 2) -> int:
+    async with SessionLocal() as session:
+        sources = await claim_due_sources(session, limit=limit)
+        processed = 0
 
-    from aiogram import Bot, Dispatcher, F
-    from aiogram.filters import Command, CommandStart
-    from aiogram.types import Message
+        for source in sources:
+            result = await sync_source(session, source)
+            processed += 1
 
-    bot = Bot(token=config.BOT_TOKEN)
-    dp = Dispatcher()
-
-    @dp.message(CommandStart())
-    async def on_start(message: Message):
-        await message.answer(
-            "Привет! Я собираю комментарии о продукте и под твоими постами "
-            "в одну ленту. Открой мини-приложение, чтобы её посмотреть.\n\n"
-            "Команда /id покажет твой Telegram id (его можно вписать в "
-            "OWNER_IDS, чтобы ленту видел только ты)."
-        )
-
-    @dp.message(Command("id"))
-    async def on_id(message: Message):
-        await message.answer(f"Твой id: {message.from_user.id}")
-
-    @dp.message(F.chat.type.in_({"group", "supergroup"}))
-    async def on_group_message(message: Message):
-        # Пропускаем автопересланный в обсуждение пост самого канала и
-        # служебные сообщения — храним только реальные комментарии людей.
-        if getattr(message, "is_automatic_forward", False):
-            return
-        if message.from_user is None or message.from_user.is_bot:
-            return
-        text = message.text or message.caption
-        if not text:
-            return
-        author = message.from_user.username or message.from_user.full_name
-        ext = f"{message.chat.id}_{message.message_id}"
-        try:
-            await db.insert_comment(
-                source="telegram",
-                external_id=ext,
-                author=author,
-                text=text,
-                url=_msg_link(message.chat, message.message_id),
-                is_own_page=True,
-                created_at=message.date,
+            logger.info(
+                "Источник %s (%s): постов %s, новых комментариев %s, отмечено %s, ошибка %s",
+                source.title,
+                source.network.value,
+                result.run.posts_seen,
+                result.run.comments_new,
+                result.flagged,
+                result.run.error or "нет",
             )
-        except Exception as e:
-            log.warning("Не удалось сохранить коммент TG %s: %s", ext, e)
 
-    log.info("Telegram-бот запущен (long polling)")
-    await dp.start_polling(bot)
+            if result.new_comment_ids and bot is not None:
+                sent = await notify_matches(session, source, result.new_comment_ids, bot)
+                if sent:
+                    logger.info("Отправлено уведомлений: %s", sent)
 
-
-async def run_scheduler() -> None:
-    scheduler = AsyncIOScheduler(timezone="UTC")
-    scheduler.add_job(
-        vk.poll_once,
-        "interval",
-        seconds=config.POLL_INTERVAL,
-        id="vk_poll",
-        next_run_time=None,
-    )
-    scheduler.start()
-    log.info("Планировщик ВК запущен, интервал %d с", config.POLL_INTERVAL)
-    # Один прогон сразу на старте (если токен есть).
-    try:
-        await vk.poll_once()
-    except Exception as e:
-        log.warning("Первый прогон ВК не удался: %s", e)
-    # Держим корутину живой.
-    while True:
-        await asyncio.sleep(3600)
+        return processed
 
 
 async def main() -> None:
-    await db.init_db()
-    log.info("БД готова")
-    await asyncio.gather(run_bot(), run_scheduler())
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    settings = get_settings()
+    await init_db()
+    logger.info("Воркер запущен, интервал опроса %s с", settings.worker_poll_seconds)
+
+    bot: Bot | None = None
+    polling: asyncio.Task | None = None
+
+    if settings.bot_token:
+        bot = Bot(settings.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+        await setup_bot(bot)
+        polling = asyncio.create_task(
+            create_dispatcher().start_polling(bot, handle_signals=False),
+            name="bot-polling",
+        )
+        logger.info("Бот подключён, команды доступны")
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with suppress(NotImplementedError):
+            loop.add_signal_handler(sig, stop.set)
+
+    try:
+        while not stop.is_set():
+            try:
+                processed = await crawl_cycle(bot)
+            except Exception:  # noqa: BLE001 — цикл не должен умирать
+                logger.exception("Сбой цикла обхода")
+                processed = 0
+
+            if processed:
+                continue
+            with suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=settings.worker_poll_seconds)
+    finally:
+        logger.info("Останавливаюсь")
+        if polling is not None:
+            polling.cancel()
+            with suppress(asyncio.CancelledError):
+                await polling
+        if bot is not None:
+            await bot.session.close()
+        await close_adapters()
+        await dispose_db()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    with suppress(KeyboardInterrupt):
+        asyncio.run(main())

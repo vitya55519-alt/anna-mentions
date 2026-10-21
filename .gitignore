@@ -1,7 +1,26 @@
-__pycache__/
-*.pyc
+# окружение
 .env
+.env.local
 .venv/
 venv/
+__pycache__/
+*.pyc
+
+# редакторы
+.idea/
+.vscode/
+*.swp
+
+# локальные данные
+*.session
+*.session-journal
+*.db
 *.sqlite3
+exports/
+
+# системное
 .DS_Store
+Thumbs.db
+
+# артефакты IDE
+.aicoding-chat-workspace

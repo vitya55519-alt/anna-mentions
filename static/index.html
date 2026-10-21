@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0d1016" />
+  <title>Коммент-сканер</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">CS</div>
+        <div class="brand-text">
+          <h1>Коммент-сканер</h1>
+          <p id="brand-sub">загрузка…</p>
+        </div>
+      </div>
+      <button class="icon-btn" id="btn-refresh" type="button" aria-label="Обновить">⟳</button>
+    </header>
+
+    <main class="content">
+      <section class="view" id="view-search">
+        <form class="searchbar" id="search-form" autocomplete="off">
+          <input id="q" type="search" placeholder="@ivan_petrov, блокировка, кремль…" enterkeyhint="search" />
+          <button class="primary" type="submit">Найти</button>
+        </form>
+
+        <div class="chip-row" id="rubric-chips"></div>
+        <div class="chip-row" id="network-chips"></div>
+
+        <div class="status" id="search-status"></div>
+        <div class="results" id="results"></div>
+        <div class="empty hidden" id="results-empty">
+          <p>Пока пусто.</p>
+          <p class="muted">Поиск идёт только по подключённым чатам.</p>
+        </div>
+        <button class="ghost wide hidden" id="btn-more" type="button">Показать остальные</button>
+        <div class="row-actions hidden" id="search-actions">
+          <button class="link-btn" id="btn-csv" type="button">экспорт /csv</button>
+        </div>
+      </section>
+
+      <section class="view hidden" id="view-sources">
+        <div class="section-head">
+          <h2>Источники</h2>
+          <button class="primary small" id="btn-add-source" type="button">Добавить</button>
+        </div>
+        <div class="list" id="sources-list"></div>
+        <div class="caps" id="caps-list"></div>
+      </section>
+
+      <section class="view hidden" id="view-words">
+        <div class="section-head"><h2>Слова</h2></div>
+        <form class="searchbar" id="watch-form" autocomplete="off">
+          <input id="watch-input" placeholder="блокировка, теракт…" />
+          <button class="primary" type="submit">Следить</button>
+        </form>
+        <p class="hint">Бот пришлёт сообщение, как только это слово появится в новом комментарии.</p>
+        <div class="list" id="watches-list"></div>
+      </section>
+    </main>
+
+    <nav class="tabbar" id="tabbar">
+      <button class="tab active" data-view="search" type="button">Поиск</button>
+      <button class="tab" data-view="sources" type="button">Источники</button>
+      <button class="tab" data-view="words" type="button">Слова</button>
+    </nav>
+  </div>
+
+  <div class="sheet hidden" id="sheet">
+    <div class="sheet-backdrop" data-close></div>
+    <div class="sheet-card">
+      <h2>Новый источник</h2>
+      <p class="hint">Добавьте бота в группу или канал — чат появится в списке сам, как только придёт первое сообщение.</p>
+      <button class="primary wide" id="btn-add-to-chat" type="button">Добавить бота в чат</button>
+      <p class="hint">Или вставьте ссылку <code>t.me/…</code>, если настроена MTProto-сессия для выгрузки истории.</p>
+      <input id="source-ref" placeholder="t.me/example" autocomplete="off" />
+      <div class="sheet-actions">
+        <button class="ghost" type="button" data-close>Отмена</button>
+        <button class="primary" id="btn-source-save" type="button">Добавить</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,37 +1,120 @@
-"""Конфигурация из переменных окружения.
+from __future__ import annotations
 
-Все секреты берём из env (на Railway — из Variables сервиса).
-Сервисы должны стартовать даже без заполненных токенов: тогда
-соответствующий сборщик просто логирует, что ждёт токен, и не падает.
-"""
-import os
+from functools import lru_cache
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-
-def _clean(value: str) -> str:
-    return (value or "").strip()
+from pydantic import field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-# Подключение к БД (Railway прокидывает DATABASE_URL в оба сервиса).
-DATABASE_URL = _clean(os.getenv("DATABASE_URL"))
+def normalize_dsn(raw: str) -> str:
+    """Railway отдаёт postgresql://…?sslmode=require — asyncpg таких параметров не понимает."""
+    if not raw:
+        return raw
+    parts = urlsplit(raw.strip())
+    scheme = "postgresql+asyncpg" if parts.scheme in {"postgres", "postgresql"} else parts.scheme
+    query = [
+        (key, value)
+        for key, value in parse_qsl(parts.query)
+        if key not in {"sslmode", "ssl", "channel_binding"}
+    ]
+    netloc = parts.netloc
+    if scheme.startswith("postgresql"):
+        netloc = netloc.replace(" ", "")
+    return urlunsplit((scheme, netloc, parts.path, urlencode(query), parts.fragment))
 
-# Токен Telegram-бота от @BotFather. Нужен worker'у (приём комментов
-# из групп обсуждения) и web (валидация initData мини-аппа).
-BOT_TOKEN = _clean(os.getenv("BOT_TOKEN"))
 
-# Токен доступа ВК (сервисный или пользовательский) для поиска по стене.
-VK_TOKEN = _clean(os.getenv("VK_TOKEN"))
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-# Ключевые слова мониторинга бренда/продукта, через запятую.
-# Например: "Anna бот, t.me/Anna634212, имя продукта"
-VK_KEYWORDS = [k.strip() for k in _clean(os.getenv("VK_KEYWORDS")).split(",") if k.strip()]
+    # --- Telegram -----------------------------------------------------------
+    bot_token: str = ""
+    webapp_url: str = ""
+    # Бот читает сообщения из чатов, куда его добавили, без MTProto-сессии.
+    tg_live_ingest: bool = True
 
-# Telegram id владельца(ев) — кому можно открывать ленту мини-аппа.
-# Через запятую. Если пусто — лента доступна любому, кто прошёл
-# валидацию initData (на этапе настройки удобно, потом заполнить).
-OWNER_IDS = {int(x) for x in _clean(os.getenv("OWNER_IDS")).replace(" ", "").split(",") if x.strip().isdigit()}
+    # --- Хранилище ----------------------------------------------------------
+    database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/comments"
 
-# Период опроса ВК в секундах.
-POLL_INTERVAL = int(_clean(os.getenv("POLL_INTERVAL")) or "300")
+    # --- VK -----------------------------------------------------------------
+    vk_token: str = ""
+    vk_user_token: str = ""
+    vk_api_version: str = "5.199"
 
-# Версия VK API.
-VK_API_VERSION = _clean(os.getenv("VK_API_VERSION")) or "5.199"
+    # --- OK -----------------------------------------------------------------
+    ok_app_key: str = ""
+    ok_app_secret: str = ""
+    ok_access_token: str = ""
+    ok_adapter_enabled: bool = False
+
+    # --- Telegram-источники (MTProto) ---------------------------------------
+    tg_api_id: int = 0
+    tg_api_hash: str = ""
+    tg_session_string: str = ""
+
+    # --- Instagram ----------------------------------------------------------
+    ig_access_token: str = ""
+    ig_business_id: str = ""
+    instagram_enabled: bool = False
+
+    # --- Какие сети включены в интерфейсе ------------------------------------
+    # Код адаптеров ВК/ОК/Instagram остаётся в проекте: достаточно перечислить их
+    # здесь через запятую и заполнить токены, чтобы они снова появились в приложении.
+    enabled_networks: str = "telegram"
+
+    # --- Проверка по рубрикам ------------------------------------------------
+    rubrics_file: str = "default.json"
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model: str = "qwen2.5:7b"
+    llm_timeout_seconds: float = 40.0
+    llm_min_score: float = 0.45
+    analyze_on_ingest: bool = True
+
+    # --- Прочее -------------------------------------------------------------
+    dev_mode: bool = False
+    dev_telegram_id: int = 1
+
+    default_crawl_interval_minutes: int = 60
+    crawl_posts_per_run: int = 20
+    crawl_backfill_posts: int = 40
+    crawl_comments_per_post: int = 200
+    worker_poll_seconds: int = 20
+    search_page_size: int = 30
+    notify_on_new_comments: bool = True
+
+    @field_validator("database_url")
+    @classmethod
+    def _validate_dsn(cls, value: str) -> str:
+        return normalize_dsn(value)
+
+    @property
+    def dsn(self) -> str:
+        return self.database_url
+
+    @property
+    def enabled_network_values(self) -> set[str]:
+        return {item.strip().lower() for item in self.enabled_networks.split(",") if item.strip()}
+
+    @property
+    def vk_access_token(self) -> str:
+        """Токен пользователя даёт доступ к wall.getComments, сервисный — только к части методов."""
+        return self.vk_user_token or self.vk_token
+
+    @property
+    def telegram_sources_ready(self) -> bool:
+        return bool(self.tg_api_id and self.tg_api_hash and self.tg_session_string)
+
+    @property
+    def ok_ready(self) -> bool:
+        return bool(self.ok_app_key and self.ok_app_secret and self.ok_access_token)
+
+    @property
+    def llm_ready(self) -> bool:
+        """Любой OpenAI-совместимый эндпоинт: Ollama (/v1), OpenRouter, OpenAI, локальный vLLM."""
+        return bool(self.llm_base_url and self.llm_model)
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
