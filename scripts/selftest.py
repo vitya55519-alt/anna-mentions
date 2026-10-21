@@ -23,7 +23,7 @@ from sqlalchemy.schema import CreateTable  # noqa: E402
 
 from app.adapters import capabilities  # noqa: E402
 from app.api.routes import _require_enabled  # noqa: E402
-from app.bot import chat_link, incoming_from_message  # noqa: E402
+from app.bot import chat_keyboard, chat_link, incoming_from_message  # noqa: E402
 from app.config import Settings  # noqa: E402
 from app.models import Comment, Network, Source  # noqa: E402
 from app.security import validate_init_data  # noqa: E402
@@ -130,6 +130,7 @@ def main() -> int:
         "лишний слэш в конце не мешает",
     )
     expect(Settings().public_webapp_url == "", "без адреса кнопка не ставится")
+    expect(chat_keyboard("group") is None, "в группе кнопку приложения не отправляем")
 
     check_title("аккаунты-сборщики")
     settings = Settings(tg_api_id=1, tg_api_hash="x", tg_session_1="a", tg_session_3="b")

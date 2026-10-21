@@ -91,6 +91,11 @@ async def _ensure_user(session, message: Message):
     )
 
 
+def chat_keyboard(chat_type: str, **params: str) -> InlineKeyboardMarkup | None:
+    """web_app-кнопку Telegram разрешает только в личке — в группах отдаём None."""
+    return app_keyboard(**params) if chat_type == "private" else None
+
+
 def welcome_text() -> str:
     if get_settings().public_webapp_url:
         return WELCOME
@@ -107,7 +112,7 @@ async def cmd_start(message: Message) -> None:
 
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
-    await message.answer(welcome_text(), reply_markup=app_keyboard())
+    await message.answer(welcome_text(), reply_markup=chat_keyboard(message.chat.type))
 
 
 @router.message(Command("find"))
@@ -265,6 +270,12 @@ async def cmd_acc(message: Message) -> None:
 @router.message(Command("app"))
 async def cmd_app(message: Message) -> None:
     """Открывает Mini App: та же кнопка, что в меню рядом с полем ввода."""
+    if message.chat.type != "private":
+        await message.answer(
+            "Кнопка приложения — в личке с ботом: «Открыть сканер» слева от поля ввода."
+        )
+        return
+
     keyboard = app_keyboard()
     if keyboard is None:
         await message.answer(
@@ -480,7 +491,7 @@ async def _search(
     if not result["items"]:
         await message.answer(
             "Ничего не нашёл. Добавьте источники в приложении — поиск идёт только по ним.",
-            reply_markup=app_keyboard(),
+            reply_markup=chat_keyboard(message.chat.type),
         )
         return
 
@@ -491,7 +502,7 @@ async def _search(
     if rest > 0:
         await message.answer(
             f"Показать остальные {rest} — в приложении.",
-            reply_markup=app_keyboard(q=query, rubric=rubric or ""),
+            reply_markup=chat_keyboard(message.chat.type, q=query, rubric=rubric or ""),
         )
 
 
