@@ -4,6 +4,8 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+from aiogram import Bot
+from aiogram.types import MenuButtonWebApp, WebAppInfo
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -21,11 +23,35 @@ logging.basicConfig(
 
 STATIC_DIR = Path(__file__).resolve().parents[1] / "static"
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+
+async def ensure_menu_button() -> None:
+    """Ставит кнопку Mini App рядом с полем ввода.
+
+    Делаем это и из web: именно у web-сервиса Railway всегда есть публичный домен,
+    а воркер может быть без него.
+    """
+    url = settings.public_webapp_url
+    if not (settings.bot_token and url):
+        if not url:
+            logger.warning("Адрес приложения неизвестен — кнопка Mini App не поставлена")
+        return
+
+    try:
+        async with Bot(settings.bot_token) as bot:
+            await bot.set_chat_menu_button(
+                menu_button=MenuButtonWebApp(text="Открыть сканер", web_app=WebAppInfo(url=url))
+            )
+        logger.info("Кнопка Mini App установлена на %s", url)
+    except Exception as exc:  # noqa: BLE001 — кнопка не критична для работы API
+        logger.warning("Не смог поставить кнопку Mini App: %s", exc)
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await init_db()
+    await ensure_menu_button()
     yield
     await dispose_db()
 

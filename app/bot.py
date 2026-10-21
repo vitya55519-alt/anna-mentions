@@ -45,6 +45,8 @@ WELCOME = (
     "/scan — обойти группы и каналы привязанных аккаунтов\n"
     "/acc — сколько аккаунтов и сколько групп в базе\n\n"
     "<b>Команды</b>\n"
+    "/app — открыть приложение кнопкой\n"
+    "/diag — проверить настройку\n"
     "/find &lt;запрос&gt; — обычный поиск, например <code>/find блокировка</code>\n"
     "/art &lt;код&gt; — находки по рубрике, например <code>/art VIOLENCE</code>\n"
     "/csv &lt;запрос&gt; — выгрузка в таблицу\n"
@@ -57,7 +59,7 @@ WELCOME = (
 
 def webapp_url(**params: str) -> str:
     settings = get_settings()
-    base = settings.webapp_url or "https://example.com"
+    base = settings.public_webapp_url or "https://example.com"
     if not params:
         return base
     separator = "&" if "?" in base else "?"
@@ -66,7 +68,7 @@ def webapp_url(**params: str) -> str:
 
 def app_keyboard(**params: str) -> InlineKeyboardMarkup | None:
     settings = get_settings()
-    if not settings.webapp_url:
+    if not settings.public_webapp_url:
         return None
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -89,14 +91,23 @@ async def _ensure_user(session, message: Message):
     )
 
 
+def welcome_text() -> str:
+    if get_settings().public_webapp_url:
+        return WELCOME
+    return WELCOME + (
+        "\n\n<b>Приложение не настроено</b>\n"
+        "Задайте в переменных worker адрес сервиса — тогда появится кнопка Mini App."
+    )
+
+
 @router.message(CommandStart(), F.chat.type == "private")
 async def cmd_start(message: Message) -> None:
-    await message.answer(WELCOME, reply_markup=app_keyboard())
+    await message.answer(welcome_text(), reply_markup=app_keyboard())
 
 
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
-    await message.answer(WELCOME, reply_markup=app_keyboard())
+    await message.answer(welcome_text(), reply_markup=app_keyboard())
 
 
 @router.message(Command("find"))
@@ -248,6 +259,71 @@ async def cmd_acc(message: Message) -> None:
         f"Групп в базе: {total}\n"
         f"Уже обойдено: {done}\n\n"
         "Обновить список групп: /scan"
+    )
+
+
+@router.message(Command("app"))
+async def cmd_app(message: Message) -> None:
+    """Открывает Mini App: та же кнопка, что в меню рядом с полем ввода."""
+    keyboard = app_keyboard()
+    if keyboard is None:
+        await message.answer(
+            "<b>Приложение пока не настроено</b>\n"
+            "Добавьте в переменные сервиса worker WEBAPP_URL — публичный адрес вида "
+            "<code>https://имя.up.railway.app</code> — и перезапустите сервис."
+        )
+        return
+
+    await message.answer(
+        "<b>Коммент-сканер</b>\n"
+        "Лента, фильтры по рубрикам и выгрузка — в приложении.",
+        reply_markup=keyboard,
+    )
+
+
+@router.message(Command("diag"))
+async def cmd_diag(message: Message, bot: Bot) -> None:
+    """Что настроено и что видит база — быстрая проверка после деплоя."""
+    from sqlalchemy import func, select, text
+
+    from app.models import Comment, Source
+
+    settings = get_settings()
+    me = await bot.get_me()
+    accounts = len(get_pool(settings).accounts)
+
+    try:
+        async with SessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+            total = (await session.execute(select(func.count()).select_from(Source))).scalar_one()
+            live = (
+                await session.execute(
+                    select(func.count()).select_from(Source).where(Source.ingest_mode == "live")
+                )
+            ).scalar_one()
+            scan = (
+                await session.execute(
+                    select(func.count()).select_from(Source).where(Source.ingest_mode == "scan")
+                )
+            ).scalar_one()
+            comments = (
+                await session.execute(select(func.count()).select_from(Comment))
+            ).scalar_one()
+        db_line = (
+            f"связь есть · источников {total} "
+            f"(бот {live}, аккаунты {scan}) · сообщений {comments}"
+        )
+    except Exception as exc:  # noqa: BLE001 — диагностика не должна падать
+        logger.warning("Диагностика: база недоступна: %s", exc)
+        db_line = f"ошибка: {exc.__class__.__name__}"
+
+    await message.answer(
+        "<b>Проверка настройки</b>\n"
+        f"Бот: @{me.username}\n"
+        f"Приложение: {html_escape(settings.public_webapp_url or 'адрес не задан')}\n"
+        f"База: {html_escape(db_line)}\n"
+        f"Аккаунты-сборщики: {accounts}\n"
+        f"Проверка через LLM: {'включена' if settings.llm_ready else 'выключена'}"
     )
 
 
@@ -432,10 +508,12 @@ def create_dispatcher() -> Dispatcher:
 
 
 BOT_COMMANDS = [
+    BotCommand(command="app", description="Открыть приложение"),
     BotCommand(command="find", description="Найти комментарии"),
     BotCommand(command="art", description="Находки по рубрике"),
     BotCommand(command="scan", description="Обойти группы аккаунтов"),
     BotCommand(command="acc", description="Аккаунты и группы"),
+    BotCommand(command="diag", description="Проверка настройки"),
     BotCommand(command="csv", description="Выгрузить в CSV"),
     BotCommand(command="add", description="Следить за словом"),
     BotCommand(command="words", description="Мои слова"),
@@ -445,14 +523,14 @@ BOT_COMMANDS = [
 
 async def setup_bot(bot: Bot) -> None:
     settings = get_settings()
+    url = settings.public_webapp_url
     try:
         await bot.set_my_commands(BOT_COMMANDS)
-        if settings.webapp_url:
+        if url:
             await bot.set_chat_menu_button(
-                menu_button=MenuButtonWebApp(
-                    text="Открыть сканер",
-                    web_app=WebAppInfo(url=settings.webapp_url),
-                )
+                menu_button=MenuButtonWebApp(text="Открыть сканер", web_app=WebAppInfo(url=url))
             )
+        else:
+            logger.warning("WEBAPP_URL не задан — кнопка Mini App не установлена")
     except Exception as exc:  # noqa: BLE001 — меню не критично для работы
         logger.warning("Не смог настроить меню бота: %s", exc)

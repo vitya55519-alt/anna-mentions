@@ -118,6 +118,19 @@ def main() -> int:
     _require_enabled(Network.telegram)
     expect(True, "Telegram разрешён")
 
+    check_title("адрес приложения")
+    expect(
+        Settings(railway_public_domain="demo.up.railway.app").public_webapp_url
+        == "https://demo.up.railway.app",
+        "адрес собирается из домена Railway",
+    )
+    expect(
+        Settings(webapp_url="https://scan.example.com/").public_webapp_url
+        == "https://scan.example.com",
+        "лишний слэш в конце не мешает",
+    )
+    expect(Settings().public_webapp_url == "", "без адреса кнопка не ставится")
+
     check_title("аккаунты-сборщики")
     settings = Settings(tg_api_id=1, tg_api_hash="x", tg_session_1="a", tg_session_3="b")
     expect(settings.tg_sessions == ["a", "b"], "сессии собираются по порядку номеров")

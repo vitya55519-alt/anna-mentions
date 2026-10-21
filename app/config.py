@@ -29,7 +29,10 @@ class Settings(BaseSettings):
 
     # --- Telegram -----------------------------------------------------------
     bot_token: str = ""
+    # Публичный HTTPS-адрес сервиса. На Railway можно не задавать:
+    # платформа сама выставляет RAILWAY_PUBLIC_DOMAIN, адрес соберётся из него.
     webapp_url: str = ""
+    railway_public_domain: str = ""
     # Бот читает сообщения из чатов, куда его добавили, без MTProto-сессии.
     tg_live_ingest: bool = True
 
@@ -113,6 +116,16 @@ class Settings(BaseSettings):
     @property
     def dsn(self) -> str:
         return self.database_url
+
+    @property
+    def public_webapp_url(self) -> str:
+        """Адрес Mini App: из WEBAPP_URL или из домена, который дал Railway."""
+        raw = (self.webapp_url or "").strip()
+        if not raw and self.railway_public_domain:
+            raw = f"https://{self.railway_public_domain.strip()}"
+        if raw and not raw.startswith(("http://", "https://")):
+            raw = f"https://{raw}"
+        return raw.rstrip("/")
 
     @property
     def enabled_network_values(self) -> set[str]:
