@@ -50,19 +50,35 @@ async def ensure_chat_source(
     owner_first_name: str | None = None,
 ) -> Source | None:
     """Находит источник для чата или заводит его на владельца — того, кто добавил бота."""
+    # Ту же группу мог раньше найти аккаунт-сборщик: источник уже есть,
+    # просто переводим его в живой режим, чтобы не дублировать ленту.
+    scan_key = f"dialog:{str(chat_id).removeprefix('-100').removeprefix('-')}"
     existing = (
         (
             await session.execute(
-                select(Source).where(
+                select(Source)
+                .where(
                     Source.network == Network.telegram,
-                    Source.external_id == str(chat_id),
+                    Source.external_id.in_((str(chat_id), scan_key)),
                 )
+                .order_by((Source.ingest_mode == "live").desc())
             )
         )
         .scalars()
         .first()
     )
     if existing is not None:
+        if existing.ingest_mode != "live":
+            existing.ingest_mode = "live"
+            existing.is_active = True
+            existing.next_crawl_at = datetime.now(timezone.utc) + timedelta(
+                days=LIVE_SOURCE_HORIZON_DAYS
+            )
+            existing.title = title or existing.title
+            existing.handle = handle or existing.handle
+            existing.url = url or existing.url
+            await session.commit()
+            logger.info("Источник «%s» переведён в живой режим", existing.title)
         return existing
     if not owner_telegram_id:
         return None

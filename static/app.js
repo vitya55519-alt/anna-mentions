@@ -289,13 +289,16 @@ function sourceHtml(source) {
 
   const last = source.last_crawl_at ? fmtDate(source.last_crawl_at) : "ещё не обходился";
   const live = source.mode === "live";
+  const scan = source.mode === "scan";
   const badge = live
     ? "live"
-    : source.mode === "experimental"
-      ? "бета"
-      : source.is_active
-        ? "активен"
-        : "пауза";
+    : scan
+      ? "скан"
+      : source.mode === "experimental"
+        ? "бета"
+        : source.is_active
+          ? "активен"
+          : "пауза";
   const error = source.last_error
     ? `<div class="source-error">${esc(source.last_error)}</div>`
     : "";
@@ -312,7 +315,13 @@ function sourceHtml(source) {
     <div class="source-stats">
       <span>постов: ${source.posts_count}</span>
       <span>комментариев: ${source.comments_count}</span>
-      <span>${live ? "сообщения в реальном времени" : `обход: ${last}`}</span>
+      <span>${
+        live
+          ? "сообщения в реальном времени"
+          : scan
+            ? `читает аккаунт · обход: ${last}`
+            : `обход: ${last}`
+      }</span>
     </div>
     ${error}
     <div class="source-actions">

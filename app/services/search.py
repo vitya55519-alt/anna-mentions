@@ -53,6 +53,8 @@ def build_tsquery(raw: str) -> str | None:
     text = (raw or "").strip()
     if not text or text.startswith("@"):
         return None  # @ник ищем по автору, полнотекстовый индекс тут не нужен
+    if text.isdigit():
+        return None  # id автора — точное совпадение, а не поиск по словам
 
     parts: list[str] = []
     for phrase, word in TOKEN_RE.findall(text):
@@ -101,6 +103,15 @@ def _text_condition(raw: str, tsquery: str | None):
         return or_(
             Comment.author_url.ilike(like, escape="\\"),
             Comment.author_name.ilike(like, escape="\\"),
+        )
+
+    if text.isdigit():
+        # /find 123456789 — поиск по id автора из Telegram
+        escaped_id = _escape_like(text)
+        return or_(
+            Comment.author_external_id == text,
+            Comment.author_name.ilike(f"%{escaped_id}%", escape="\\"),
+            Comment.text.ilike(f"%{escaped_id}%", escape="\\"),
         )
 
     escaped = _escape_like(text)

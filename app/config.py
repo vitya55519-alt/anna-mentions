@@ -48,8 +48,15 @@ class Settings(BaseSettings):
     ok_adapter_enabled: bool = False
 
     # --- Telegram-источники (MTProto) ---------------------------------------
+    # Одно приложение (api_id/api_hash) и несколько аккаунтов-сборщиков.
+    # TG_SESSION_1..5 — строки сессий: python scripts/tg_login.py
     tg_api_id: int = 0
     tg_api_hash: str = ""
+    tg_session_1: str = ""
+    tg_session_2: str = ""
+    tg_session_3: str = ""
+    tg_session_4: str = ""
+    tg_session_5: str = ""
     tg_session_string: str = ""
 
     # --- Instagram ----------------------------------------------------------
@@ -70,6 +77,21 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = 40.0
     llm_min_score: float = 0.45
     analyze_on_ingest: bool = True
+
+    # --- Сканирование групп аккаунтами --------------------------------------
+    tg_scan_enabled: bool = True
+    # Сколько диалогов брать у каждого аккаунта (сортировка по активности)
+    tg_scan_dialogs_limit: int = 100
+    # Сколько последних сообщений читать из группы за один проход
+    tg_scan_messages_per_dialog: int = 120
+    # Сканировать ли каналы, а не только группы
+    tg_scan_channels: bool = True
+    # Кому принадлежат найденные группы (0 — первый запустивший бота)
+    owner_telegram_id: int = 0
+    # Пауза между сообщениями: снижает риск FloodWait
+    tg_scan_pause_seconds: float = 0.3
+    # Как часто перечитывать список групп аккаунтов
+    tg_scan_interval_minutes: int = 60
 
     # --- Прочее -------------------------------------------------------------
     dev_mode: bool = False
@@ -104,6 +126,23 @@ class Settings(BaseSettings):
     @property
     def telegram_sources_ready(self) -> bool:
         return bool(self.tg_api_id and self.tg_api_hash and self.tg_session_string)
+
+    @property
+    def tg_sessions(self) -> list[str]:
+        """Аккаунты-сборщики: TG_SESSION_1..5 плюс старая TG_SESSION_STRING."""
+        values = [
+            self.tg_session_1,
+            self.tg_session_2,
+            self.tg_session_3,
+            self.tg_session_4,
+            self.tg_session_5,
+            self.tg_session_string,
+        ]
+        return [value.strip() for value in values if value and value.strip()]
+
+    @property
+    def tg_accounts_ready(self) -> bool:
+        return bool(self.tg_api_id and self.tg_api_hash and self.tg_sessions)
 
     @property
     def ok_ready(self) -> bool:

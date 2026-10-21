@@ -24,10 +24,12 @@ from sqlalchemy.schema import CreateTable  # noqa: E402
 from app.adapters import capabilities  # noqa: E402
 from app.api.routes import _require_enabled  # noqa: E402
 from app.bot import chat_link, incoming_from_message  # noqa: E402
+from app.config import Settings  # noqa: E402
 from app.models import Comment, Network, Source  # noqa: E402
 from app.security import validate_init_data  # noqa: E402
 from app.services.rubrics import get_rubric_set  # noqa: E402
 from app.services.search import build_tsquery  # noqa: E402
+from app.services.tg_scan import dialog_key  # noqa: E402
 
 OK = "ok"
 
@@ -50,6 +52,7 @@ def main() -> int:
     print("   ", query)
     expect(query == "'блокировка':* & 'кремль':*", "префиксы и объединение по AND")
     expect(build_tsquery("   ") is None, "пустой запрос → None")
+    expect(build_tsquery("123456789") is None, "id автора ищется точно, без tsquery")
 
     check_title("рубрики")
     rubric = get_rubric_set("default.json")
@@ -114,6 +117,13 @@ def main() -> int:
         expect("отключён" in str(exc.detail), "ВК отклонён, пока выключен")
     _require_enabled(Network.telegram)
     expect(True, "Telegram разрешён")
+
+    check_title("аккаунты-сборщики")
+    settings = Settings(tg_api_id=1, tg_api_hash="x", tg_session_1="a", tg_session_3="b")
+    expect(settings.tg_sessions == ["a", "b"], "сессии собираются по порядку номеров")
+    expect(settings.tg_accounts_ready, "аккаунты готовы при api_id, api_hash и сессии")
+    expect(not Settings(tg_session_1="a").tg_accounts_ready, "без api_id сборщик выключен")
+    expect(dialog_key(-1001234567890) == "dialog:-1001234567890", "ключ группы в базе")
 
     check_title("DDL")
     ddl = str(CreateTable(Comment.__table__).compile(dialect=postgresql.dialect()))

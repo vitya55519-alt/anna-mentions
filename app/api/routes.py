@@ -64,7 +64,13 @@ def _source_out(source: Source) -> SourceOut:
     data = SourceOut.model_validate(source)
     data.network_title = source.network.title
     # live — сообщения приходят от бота в реальном времени, а не по расписанию.
-    data.mode = "live" if source.ingest_mode == "live" else adapter.mode
+    # scan — группу читает один из привязанных аккаунтов Telegram.
+    if source.ingest_mode == "live":
+        data.mode = "live"
+    elif source.ingest_mode == "scan":
+        data.mode = "scan"
+    else:
+        data.mode = adapter.mode
     return data
 
 

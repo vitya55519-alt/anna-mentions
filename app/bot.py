@@ -22,7 +22,15 @@ from app.db import SessionLocal
 from app.models import Watch
 from app.services.ingest import IncomingComment, ensure_chat_source, ingest_telegram_message
 from app.services.present import card_from_item
-from app.services.search import SearchParams, ensure_user, export_csv, search_comments
+from app.services.search import (
+    SearchParams,
+    build_stats,
+    ensure_user,
+    export_csv,
+    search_comments,
+)
+from app.services.tg_accounts import get_pool
+from app.services.tg_scan import discover_dialogs, queue_scan
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -33,6 +41,9 @@ WELCOME = (
     "<b>Как подключить чат</b>\n"
     "Добавьте бота в группу или канал. Для групп выключите Privacy Mode в @BotFather, "
     "иначе бот не увидит сообщения.\n\n"
+    "<b>Группы ваших аккаунтов</b>\n"
+    "/scan — обойти группы и каналы привязанных аккаунтов\n"
+    "/acc — сколько аккаунтов и сколько групп в базе\n\n"
     "<b>Команды</b>\n"
     "/find &lt;запрос&gt; — обычный поиск, например <code>/find блокировка</code>\n"
     "/art &lt;код&gt; — находки по рубрике, например <code>/art VIOLENCE</code>\n"
@@ -164,8 +175,6 @@ async def cmd_words(message: Message) -> None:
 
 @router.message(Command("stats"))
 async def cmd_stats(message: Message) -> None:
-    from app.services.search import build_stats
-
     async with SessionLocal() as session:
         user = await _ensure_user(session, message)
         if user is None:
@@ -179,6 +188,66 @@ async def cmd_stats(message: Message) -> None:
         f"Проверено: {stats['checked_total']}\n"
         f"С отметкой: {stats['flagged_total']}\n"
         f"Новых за сутки: {stats['comments_last_24h']}"
+    )
+
+
+@router.message(Command("scan"))
+async def cmd_scan(message: Message) -> None:
+    """Обходит группы и каналы всех привязанных аккаунтов прямо сейчас."""
+    settings = get_settings()
+    pool = get_pool(settings)
+    if not pool.ready():
+        await message.answer(pool.hint())
+        return
+
+    status = await message.answer("Смотрю группы в аккаунтах, это может занять минуту…")
+    async with SessionLocal() as session:
+        found = await discover_dialogs(session, settings, pool)
+        queued = await queue_scan(session)
+
+    await status.edit_text(
+        "<b>Готово</b>\n"
+        f"Аккаунтов: {found['accounts']}\n"
+        f"Групп и каналов: {found['dialogs']}\n"
+        f"Новых источников: {found['created']}\n"
+        f"В очереди на обход: {queued}\n\n"
+        "Сообщения появятся в ленте по мере обхода групп."
+    )
+
+
+@router.message(Command("acc"))
+async def cmd_acc(message: Message) -> None:
+    from sqlalchemy import func, select
+
+    from app.models import Source
+
+    settings = get_settings()
+    pool = get_pool(settings)
+
+    async with SessionLocal() as session:
+        total = (
+            await session.execute(
+                select(func.count()).select_from(Source).where(Source.ingest_mode == "scan")
+            )
+        ).scalar_one()
+        done = (
+            await session.execute(
+                select(func.count())
+                .select_from(Source)
+                .where(Source.ingest_mode == "scan", Source.last_crawl_at.is_not(None))
+            )
+        ).scalar_one()
+
+    if not pool.ready():
+        await message.answer(pool.hint())
+        return
+
+    await message.answer(
+        "<b>Сборщики групп</b>\n"
+        f"Аккаунтов привязано: {len(pool.accounts)}\n"
+        f"Групп в базе: {total}\n"
+        f"Уже обойдено: {done}\n\n"
+        "Обновить список групп: /scan"
     )
 
 
@@ -365,6 +434,8 @@ def create_dispatcher() -> Dispatcher:
 BOT_COMMANDS = [
     BotCommand(command="find", description="Найти комментарии"),
     BotCommand(command="art", description="Находки по рубрике"),
+    BotCommand(command="scan", description="Обойти группы аккаунтов"),
+    BotCommand(command="acc", description="Аккаунты и группы"),
     BotCommand(command="csv", description="Выгрузить в CSV"),
     BotCommand(command="add", description="Следить за словом"),
     BotCommand(command="words", description="Мои слова"),
