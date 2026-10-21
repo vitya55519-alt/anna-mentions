@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Лента упоминаний</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root{
+    --bg: var(--tg-theme-bg-color, #17181c);
+    --card: var(--tg-theme-secondary-bg-color, #202228);
+    --text: var(--tg-theme-text-color, #eceef1);
+    --hint: var(--tg-theme-hint-color, #8a8f98);
+    --link: var(--tg-theme-link-color, #6ea8fe);
+    --accent: var(--tg-theme-button-color, #5a8cff);
+    --accent-text: var(--tg-theme-button-text-color, #fff);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{
+    margin:0;background:var(--bg);color:var(--text);
+    font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    padding:0 0 32px;
+  }
+  header{
+    position:sticky;top:0;z-index:5;background:var(--bg);
+    padding:14px 16px 8px;border-bottom:1px solid rgba(255,255,255,.06);
+  }
+  h1{font-size:17px;margin:0 0 10px;font-weight:650}
+  .tabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px;scrollbar-width:none}
+  .tabs::-webkit-scrollbar{display:none}
+  .tab{
+    flex:0 0 auto;padding:6px 14px;border-radius:999px;cursor:pointer;
+    background:var(--card);color:var(--hint);font-size:13px;font-weight:600;
+    border:1px solid transparent;white-space:nowrap;user-select:none;
+  }
+  .tab.active{background:var(--accent);color:var(--accent-text)}
+  main{padding:12px 16px}
+  .card{
+    background:var(--card);border-radius:14px;padding:13px 14px;margin-bottom:10px;
+    border:1px solid rgba(255,255,255,.05);
+  }
+  .meta{display:flex;align-items:center;gap:8px;margin-bottom:7px;flex-wrap:wrap}
+  .badge{
+    font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;
+    text-transform:uppercase;letter-spacing:.3px;
+  }
+  .badge.vk{background:#2787f5;color:#fff}
+  .badge.telegram{background:#2aabee;color:#fff}
+  .badge.ok{background:#ee8208;color:#fff}
+  .badge.instagram{background:#c13584;color:#fff}
+  .own{font-size:11px;color:var(--hint);border:1px solid var(--hint);padding:1px 6px;border-radius:6px}
+  .matched{font-size:11px;color:var(--hint)}
+  .date{margin-left:auto;font-size:12px;color:var(--hint)}
+  .author{font-weight:600;font-size:13px;margin-bottom:3px}
+  .text{white-space:pre-wrap;word-break:break-word}
+  .card a.src{display:inline-block;margin-top:8px;color:var(--link);font-size:13px;text-decoration:none}
+  .empty,.err{text-align:center;color:var(--hint);padding:48px 20px;font-size:14px}
+  .err{color:#ff6b6b}
+  .skeleton{height:84px;border-radius:14px;background:var(--card);margin-bottom:10px;
+    animation:p 1.2s ease-in-out infinite}
+  @keyframes p{0%,100%{opacity:.5}50%{opacity:.85}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Лента упоминаний</h1>
+  <div class="tabs" id="tabs">
+    <div class="tab active" data-src="all">Все</div>
+    <div class="tab" data-src="vk">ВКонтакте</div>
+    <div class="tab" data-src="telegram">Telegram</div>
+    <div class="tab" data-src="ok">Одноклассники</div>
+    <div class="tab" data-src="instagram">Instagram</div>
+  </div>
+</header>
+<main id="feed"></main>
+
+<script>
+const tg = window.Telegram ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+const initData = tg ? tg.initData : "";
+let current = "all";
+
+const feed = document.getElementById("feed");
+const tabs = document.getElementById("tabs");
+
+function esc(s){ return (s||"").replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function fmtDate(iso){
+  if(!iso) return "";
+  try{
+    const d = new Date(iso);
+    return d.toLocaleString(undefined,{day:'2-digit',month:'2-digit',year:'2-digit',hour:'2-digit',minute:'2-digit'});
+  }catch(e){ return ""; }
+}
+
+const SRC_LABEL = {vk:"ВК", telegram:"Telegram", ok:"ОК", instagram:"Instagram"};
+
+function render(items){
+  if(!items.length){ feed.innerHTML = '<div class="empty">Пока пусто. Как только появятся новые упоминания или комментарии — они будут здесь.</div>'; return; }
+  feed.innerHTML = items.map(c => `
+    <div class="card">
+      <div class="meta">
+        <span class="badge ${esc(c.source)}">${SRC_LABEL[c.source]||esc(c.source)}</span>
+        ${c.is_own_page ? '<span class="own">моя площадка</span>' : ''}
+        ${c.matched ? `<span class="matched">по слову: ${esc(c.matched)}</span>` : ''}
+        <span class="date">${fmtDate(c.created_at)}</span>
+      </div>
+      ${c.author ? `<div class="author">${esc(c.author)}</div>` : ''}
+      <div class="text">${esc(c.text)||'<span class="matched">(без текста)</span>'}</div>
+      ${c.url ? `<a class="src" href="${esc(c.url)}" target="_blank" rel="noopener">Открыть в источнике →</a>` : ''}
+    </div>`).join("");
+}
+
+async function load(src){
+  feed.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+  try{
+    const r = await fetch(`/api/comments?source=${encodeURIComponent(src)}`, {
+      headers: { "Authorization": "tma " + initData }
+    });
+    if(r.status === 401){ feed.innerHTML = '<div class="err">Не удалось подтвердить доступ. Откройте ленту через кнопку в боте.</div>'; return; }
+    if(r.status === 403){ feed.innerHTML = '<div class="err">Эта лента приватная — доступ только у владельца.</div>'; return; }
+    if(!r.ok){ feed.innerHTML = '<div class="err">Ошибка загрузки ('+r.status+').</div>'; return; }
+    const data = await r.json();
+    render(data.comments || []);
+  }catch(e){
+    feed.innerHTML = '<div class="err">Нет связи с сервером.</div>';
+  }
+}
+
+tabs.addEventListener("click", e => {
+  const t = e.target.closest(".tab");
+  if(!t) return;
+  [...tabs.children].forEach(x => x.classList.remove("active"));
+  t.classList.add("active");
+  current = t.dataset.src;
+  load(current);
+});
+
+load(current);
+setInterval(() => load(current), 60000);
+</script>
+</body>
+</html>
