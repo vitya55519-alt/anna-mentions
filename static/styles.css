@@ -259,6 +259,27 @@ button.link-btn {
   font-size: 14.5px;
 }
 
+/* Группа — details: длинный список можно сворачивать по одной записи. */
+summary.lookup-head {
+  cursor: pointer;
+  list-style: none;
+}
+
+summary.lookup-head::-webkit-details-marker {
+  display: none;
+}
+
+summary.lookup-head::after {
+  content: "▾";
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+details.lookup-group:not([open]) summary.lookup-head::after {
+  content: "▸";
+}
+
 .lookup-head .muted {
   font-size: 12.5px;
 }

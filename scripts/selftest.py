@@ -102,10 +102,36 @@ def main() -> int:
     phone = parse_identifier("+7 (999) 123-45-67")
     expect(phone.kind == "phone" and phone.digits == "79991234567", "телефон очищается от скобок и дефисов")
     expect(parse_identifier("123456789").kind == "id", "число — это id")
+    expect(parse_identifier("1234567890").kind == "id", "10 цифр не с девятки — тоже id")
+    expect(parse_identifier("89991234567").kind == "phone", "11 цифр — телефон")
+    expect(parse_identifier("42").kind == "unknown", "слишком короткое число не принимается")
+    expect(parse_identifier("ivan_petrov").kind == "username", "ник без собаки тоже ник")
     expect(parse_identifier("id 987654321").value == "987654321", "префикс id отбрасывается")
+    expect(
+        [item.value for item in parse_identifiers(["id 987654321, tg555666777"])] == ["987654321", "555666777"],
+        "префикс с пробелом не даёт лишнюю запись",
+    )
     expect(parse_identifier("привет").kind == "unknown", "текст не принимается за контакт")
     expect(len(parse_identifiers(["@ivan, @IVAN", "t.me/ivan"])) == 1, "повторы в списке убираются")
-    expect(len(parse_identifiers([",".join(f"user{i}" for i in range(20))])) == 10, "в списке не больше 10 записей")
+    capped = parse_identifiers([",".join(f"user{i}" for i in range(120))])
+    expect(len(capped) == 100 and capped.dropped == 20, "в списке не больше 100 записей, лишние считаются")
+
+    mixed = parse_identifiers(["ivan_petrov, +7 (999) 123-45-67, 123456789"])
+    expect([item.kind for item in mixed] == ["username", "phone", "id"], "три записи одной строкой")
+    expect(mixed[1].digits == "79991234567", "телефон в строке не порезан на куски")
+    expect(
+        [item.kind for item in parse_identifiers(["@anna\n123456789\nt.me/olga"])]
+        == ["username", "id", "username"],
+        "список по одной в строке",
+    )
+    expect(
+        len(parse_identifiers(["anna_p 123456789 89991234567"])) == 3,
+        "записи через пробел тоже разбираются",
+    )
+    expect(
+        [item.value for item in parse_identifiers(["123456789\n1234567890"])] == ["123456789", "1234567890"],
+        "два id подряд не склеиваются в телефон",
+    )
 
     phone_sql = str(
         select(Comment.id).where(identifier_condition(phone)).compile(dialect=postgresql.dialect())

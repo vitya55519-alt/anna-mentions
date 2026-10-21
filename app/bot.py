@@ -156,7 +156,7 @@ async def cmd_check(message: Message, command: CommandObject) -> None:
     raw = (command.args or "").strip()
     if not raw:
         await message.answer(
-            "Пришлите список — по одному в строке или через запятую:\n"
+            "Пришлите список — по одному в строке или через запятую (до 100 записей):\n"
             "<code>@ivan_petrov, 123456789, +7 999 123-45-67</code>"
         )
         return
@@ -172,14 +172,27 @@ async def cmd_check(message: Message, command: CommandObject) -> None:
         await message.answer(f"Не разобрал: {html_escape(unknown)}")
         return
 
-    parts = [f"<b>Записей:</b> {len(result['groups'])}"]
-    for group in result["groups"]:
+    hit = [group for group in result["groups"] if group["total"]]
+    empty = [group["raw"] for group in result["groups"] if not group["total"]]
+    parts = [
+        f"<b>Записей:</b> {len(result['groups'])} · "
+        f"с совпадениями: {len(hit)} · сообщений: {result['total']}"
+    ]
+    if result["dropped"]:
+        parts.append(f"\nвзял первые 100 записей, ещё {result['dropped']} не проверял")
+
+    # В сообщение влезает немного: карточки — только по первым записям.
+    for group in hit[:10]:
         parts.append(f"\n<b>{html_escape(group['raw'])}</b> — {group['total']}")
-        for item in group["items"][:2]:
-            parts.append(card_from_item(item, limit=160))
-        rest = group["total"] - min(2, len(group["items"]))
-        if rest > 0:
-            parts.append(f"ещё {rest} — в приложении")
+        for item in group["items"][:1]:
+            parts.append(card_from_item(item, limit=140))
+    if len(hit) > 10:
+        parts.append(f"\nещё {len(hit) - 10} с находками — в приложении")
+
+    if empty:
+        preview = ", ".join(html_escape(value) for value in empty[:20])
+        tail = "…" if len(empty) > 20 else ""
+        parts.append(f"\n\nбез совпадений ({len(empty)}): {preview}{tail}")
 
     await message.answer("\n".join(parts)[:4000], reply_markup=chat_keyboard(message.chat.type))
 

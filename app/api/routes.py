@@ -261,6 +261,7 @@ async def lookup(payload: LookupIn, user: CurrentUser, session: SessionDep) -> L
         groups=[IdentifierGroupOut(**group) for group in result["groups"]],
         unknown=result["unknown"],
         total=result["total"],
+        dropped=result["dropped"],
         took_ms=result["took_ms"],
     )
 

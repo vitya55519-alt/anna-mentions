@@ -161,21 +161,33 @@ function renderStatus(data) {
     `Готово за ${seconds} с · проверено ${data.checked} · совпадений ${data.matched}`;
 }
 
+function lookupGroup(group, index) {
+  const remain = group.total - group.items.length;
+  // Длинный список не раскрываем целиком: первые десять — открыты, остальные сворачиваются.
+  return `<details class="lookup-group" ${index < 10 ? "open" : ""}>
+    <summary class="lookup-head">
+      <b>${esc(group.raw)}</b>
+      <span class="muted">${esc(KINDS[group.kind] || group.kind)} · ${group.total}</span>
+    </summary>
+    ${group.items.map(cardHtml).join("")}
+    ${remain > 0 ? `<p class="muted">ещё ${remain} — ищите через поиск</p>` : ""}
+  </details>`;
+}
+
 function lookupHtml(data) {
-  const blocks = data.groups.map((group) => {
-    const remain = group.total - group.items.length;
-    const body = group.total
-      ? group.items.map(cardHtml).join("") +
-        (remain > 0 ? `<p class="muted">ещё ${remain} — ищите через поиск</p>` : "")
-      : `<p class="muted">совпадений нет</p>`;
-    return `<div class="lookup-group">
+  const found = data.groups.filter((group) => group.total > 0);
+  const empty = data.groups.filter((group) => !group.total);
+  const blocks = found.map(lookupGroup);
+
+  if (empty.length) {
+    blocks.push(`<div class="lookup-group">
       <div class="lookup-head">
-        <b>${esc(group.raw)}</b>
-        <span class="muted">${esc(KINDS[group.kind] || group.kind)} · ${group.total}</span>
+        <b>без совпадений</b>
+        <span class="muted">${empty.length}</span>
       </div>
-      ${body}
-    </div>`;
-  });
+      <p class="muted">${empty.map((group) => esc(group.raw)).join(", ")}</p>
+    </div>`);
+  }
 
   if (data.unknown.length) {
     blocks.push(`<div class="lookup-group">
@@ -184,7 +196,7 @@ function lookupHtml(data) {
     </div>`);
   }
 
-  return blocks.join("") || `<p class="muted">Пустой список.</p>`;
+  return blocks.join("") || `<p class="muted">Список пуст.</p>`;
 }
 
 async function runLookup() {
@@ -204,7 +216,9 @@ async function runLookup() {
       body: JSON.stringify({ identifiers: [raw] }),
     });
     const seconds = (data.took_ms / 1000).toFixed(1).replace(".", ",");
-    el.lookupStatus.textContent = `Готово за ${seconds} с · найдено ${data.total} сообщ.`;
+    const count = data.groups.length + data.unknown.length;
+    const limit = data.dropped ? ` · не влезло ${data.dropped} (лимит 100)` : "";
+    el.lookupStatus.textContent = `Готово за ${seconds} с · записей ${count} · сообщений ${data.total}${limit}`;
     el.lookupResults.innerHTML = lookupHtml(data);
     haptic("medium");
   } catch (error) {

@@ -121,8 +121,8 @@ class SearchOut(BaseModel):
 
 
 class LookupIn(BaseModel):
-    # Список строк как ввёл пользователь: @ник, id, телефон — по одному или через запятую.
-    identifiers: list[str] = Field(min_length=1, max_length=10)
+    # Список как ввёл пользователь: строки, запятые, пробелы — до 100 записей.
+    identifiers: list[str] = Field(min_length=1, max_length=100)
 
 
 class IdentifierGroupOut(BaseModel):
@@ -137,6 +137,7 @@ class LookupOut(BaseModel):
     groups: list[IdentifierGroupOut]
     unknown: list[str] = Field(default_factory=list)
     total: int
+    dropped: int = 0
     took_ms: int
 
 
