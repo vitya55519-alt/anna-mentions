@@ -11,7 +11,8 @@ from sqlalchemy import and_, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Comment, Post, Source, User
-from app.services.present import verdict_label
+from app.services.identifiers import identifier_condition, parse_phone
+from app.services.present import to_item, verdict_label
 
 TS_CONFIG = literal_column("'russian'")
 HEADLINE_OPTIONS = literal_column(
@@ -55,8 +56,8 @@ def build_tsquery(raw: str) -> str | None:
     text = (raw or "").strip()
     if not text or text.startswith("@"):
         return None  # @ник ищем по автору, полнотекстовый индекс тут не нужен
-    if text.isdigit() or ARTICLE_RE.fullmatch(text):
-        return None  # id автора или номер статьи — точное совпадение, а не поиск по словам
+    if text.isdigit() or ARTICLE_RE.fullmatch(text) or parse_phone(text):
+        return None  # id автора, номер статьи или телефон — точное совпадение, а не поиск по словам
 
     parts: list[str] = []
     for phrase, word in TOKEN_RE.findall(text):
@@ -106,6 +107,11 @@ def _text_condition(raw: str, tsquery: str | None):
             Comment.author_url.ilike(like, escape="\\"),
             Comment.author_name.ilike(like, escape="\\"),
         )
+
+    phone = parse_phone(text)
+    if phone is not None:
+        # +7 999 123-45-67 — сравниваем цифры в тексте, а не ищем эту строку целиком
+        return identifier_condition(phone)
 
     if text.isdigit():
         # /find 123456789 — поиск по id автора из Telegram; /find 280 — ещё и статья
@@ -206,7 +212,7 @@ async def search_comments(
     )
     rubric_rows = (await session.execute(rubric_stmt)).all()
 
-    items = [_to_item(comment, source, post, text) for comment, source, post, text in rows]
+    items = [to_item(comment, source, post, text) for comment, source, post, text in rows]
 
     return {
         "items": items,
@@ -219,38 +225,6 @@ async def search_comments(
         "facets": {str(network): int(count) for network, count in facet_rows},
         "rubrics": {str(code): int(count) for code, count in rubric_rows},
         "query": params.query,
-    }
-
-
-def _to_item(comment: Comment, source: Source, post: Post, snippet: str) -> dict:
-    return {
-        "id": comment.id,
-        "network": comment.network,
-        "text": comment.text,
-        "snippet": snippet or comment.text,
-        "author_name": comment.author_name,
-        "author_url": comment.author_url,
-        "published_at": comment.published_at,
-        "likes": comment.likes,
-        "url": comment.url,
-        "parent_external_id": comment.parent_external_id,
-        "verdict": comment.verdict,
-        "rubric": comment.rubric,
-        "rationale": comment.rationale,
-        "score": comment.risk_score,
-        "source": {
-            "id": source.id,
-            "title": source.title,
-            "handle": source.handle,
-            "network": source.network,
-            "avatar_url": source.avatar_url,
-        },
-        "post": {
-            "id": post.id,
-            "text": post.text,
-            "url": post.url,
-            "published_at": post.published_at,
-        },
     }
 
 

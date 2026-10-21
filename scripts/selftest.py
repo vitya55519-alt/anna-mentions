@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from aiogram.types import Chat, Message  # noqa: E402
 from fastapi import HTTPException  # noqa: E402
+from sqlalchemy import select  # noqa: E402
 from sqlalchemy.dialects import postgresql  # noqa: E402
 from sqlalchemy.schema import CreateTable  # noqa: E402
 
@@ -27,6 +28,12 @@ from app.bot import chat_keyboard, chat_link, incoming_from_message  # noqa: E40
 from app.config import Settings  # noqa: E402
 from app.models import Comment, Network, Source  # noqa: E402
 from app.security import validate_init_data  # noqa: E402
+from app.services.identifiers import (
+    identifier_condition,
+    parse_identifier,
+    parse_identifiers,
+    parse_phone,
+)  # noqa: E402
 from app.services.rubrics import get_rubric_set  # noqa: E402
 from app.services.search import build_tsquery  # noqa: E402
 from app.services.tg_scan import dialog_key  # noqa: E402
@@ -81,6 +88,38 @@ def main() -> int:
     check_title("рубрики по умолчанию")
     expect(get_rubric_set().id == "uk_rf", "по умолчанию берётся набор статей УК РФ")
     expect(get_rubric_set().codes == rubric.codes, "набор из настроек совпадает с набором статей")
+
+    check_title("поиск по списку")
+    expect(
+        parse_identifier("@Ivan_Petrov").kind == "username"
+        and parse_identifier("@Ivan_Petrov").value == "ivan_petrov",
+        "@ник приводится к нижнему регистру",
+    )
+    expect(
+        parse_identifier("t.me/anna").kind == "username" and parse_identifier("t.me/anna").value == "anna",
+        "ссылка t.me — это юзернейм",
+    )
+    phone = parse_identifier("+7 (999) 123-45-67")
+    expect(phone.kind == "phone" and phone.digits == "79991234567", "телефон очищается от скобок и дефисов")
+    expect(parse_identifier("123456789").kind == "id", "число — это id")
+    expect(parse_identifier("id 987654321").value == "987654321", "префикс id отбрасывается")
+    expect(parse_identifier("привет").kind == "unknown", "текст не принимается за контакт")
+    expect(len(parse_identifiers(["@ivan, @IVAN", "t.me/ivan"])) == 1, "повторы в списке убираются")
+    expect(len(parse_identifiers([",".join(f"user{i}" for i in range(20))])) == 10, "в списке не больше 10 записей")
+
+    phone_sql = str(
+        select(Comment.id).where(identifier_condition(phone)).compile(dialect=postgresql.dialect())
+    )
+    expect("regexp_replace" in phone_sql, "телефон ищется по цифрам в тексте")
+    name_sql = str(
+        select(Comment.id)
+        .where(identifier_condition(parse_identifier("@ivan_petrov")))
+        .compile(dialect=postgresql.dialect())
+    )
+    expect("lower" in name_sql and "LIKE" in name_sql, "ник ищется по ссылке профиля")
+    expect(parse_phone("+7 999 123-45-67") is not None, "телефон распознаётся в обычном поиске")
+    expect(parse_phone("блокировка кремль") is None, "фраза не считается телефоном")
+    expect(build_tsquery("+7 999 123-45-67") is None, "телефон не идёт в полнотекстовый поиск")
 
     check_title("initData")
     token = "123456:TEST"

@@ -37,6 +37,16 @@ const el = {
   addToChat: $("btn-add-to-chat"),
   toast: $("toast"),
   brandSub: $("brand-sub"),
+  lookupInput: $("lookup-input"),
+  lookupBtn: $("btn-lookup"),
+  lookupStatus: $("lookup-status"),
+  lookupResults: $("lookup-results"),
+};
+
+const KINDS = {
+  username: "юзернейм",
+  id: "id",
+  phone: "телефон",
 };
 
 const VERDICTS = {
@@ -149,6 +159,60 @@ function renderStatus(data) {
   const seconds = (data.took_ms / 1000).toFixed(1).replace(".", ",");
   el.status.textContent =
     `Готово за ${seconds} с · проверено ${data.checked} · совпадений ${data.matched}`;
+}
+
+function lookupHtml(data) {
+  const blocks = data.groups.map((group) => {
+    const remain = group.total - group.items.length;
+    const body = group.total
+      ? group.items.map(cardHtml).join("") +
+        (remain > 0 ? `<p class="muted">ещё ${remain} — ищите через поиск</p>` : "")
+      : `<p class="muted">совпадений нет</p>`;
+    return `<div class="lookup-group">
+      <div class="lookup-head">
+        <b>${esc(group.raw)}</b>
+        <span class="muted">${esc(KINDS[group.kind] || group.kind)} · ${group.total}</span>
+      </div>
+      ${body}
+    </div>`;
+  });
+
+  if (data.unknown.length) {
+    blocks.push(`<div class="lookup-group">
+      <div class="lookup-head"><b>не разобрал</b></div>
+      <p class="muted">${data.unknown.map(esc).join(", ")}</p>
+    </div>`);
+  }
+
+  return blocks.join("") || `<p class="muted">Пустой список.</p>`;
+}
+
+async function runLookup() {
+  const raw = el.lookupInput.value.trim();
+  if (!raw) {
+    toast("Вставьте список");
+    return;
+  }
+
+  el.lookupBtn.disabled = true;
+  el.lookupStatus.textContent = "Проверяю…";
+  el.lookupResults.innerHTML = "";
+  try {
+    // Разбирает сервер: телефон с пробелами и дефисами — одна запись, а не три.
+    const data = await api("/api/lookup", {
+      method: "POST",
+      body: JSON.stringify({ identifiers: [raw] }),
+    });
+    const seconds = (data.took_ms / 1000).toFixed(1).replace(".", ",");
+    el.lookupStatus.textContent = `Готово за ${seconds} с · найдено ${data.total} сообщ.`;
+    el.lookupResults.innerHTML = lookupHtml(data);
+    haptic("medium");
+  } catch (error) {
+    el.lookupStatus.textContent = "";
+    toast(error.message);
+  } finally {
+    el.lookupBtn.disabled = false;
+  }
 }
 
 function renderChips(data) {
@@ -513,6 +577,10 @@ function bindUi() {
 
   el.more.addEventListener("click", loadMore);
   el.csv.addEventListener("click", downloadCsv);
+  el.lookupBtn.addEventListener("click", runLookup);
+  el.lookupInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) runLookup();
+  });
   $("btn-refresh").addEventListener("click", async () => {
     await Promise.all([loadStats(), loadSources()]);
     await runSearch(true);

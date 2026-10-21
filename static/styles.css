@@ -227,6 +227,42 @@ button.link-btn {
   color: var(--muted);
 }
 
+.lookup-input {
+  width: 100%;
+  min-height: 128px;
+  margin-bottom: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.55;
+  resize: vertical;
+  outline: none;
+}
+
+.lookup-input:focus {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+.lookup-group {
+  margin-bottom: 18px;
+}
+
+.lookup-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 14.5px;
+}
+
+.lookup-head .muted {
+  font-size: 12.5px;
+}
+
 .results {
   display: flex;
   flex-direction: column;

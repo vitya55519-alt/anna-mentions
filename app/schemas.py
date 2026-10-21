@@ -120,6 +120,26 @@ class SearchOut(BaseModel):
     query: str = ""
 
 
+class LookupIn(BaseModel):
+    # Список строк как ввёл пользователь: @ник, id, телефон — по одному или через запятую.
+    identifiers: list[str] = Field(min_length=1, max_length=10)
+
+
+class IdentifierGroupOut(BaseModel):
+    raw: str
+    kind: str
+    value: str
+    total: int
+    items: list[CommentOut]
+
+
+class LookupOut(BaseModel):
+    groups: list[IdentifierGroupOut]
+    unknown: list[str] = Field(default_factory=list)
+    total: int
+    took_ms: int
+
+
 class WatchOut(ORMModel):
     id: int
     keyword: str

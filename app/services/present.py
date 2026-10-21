@@ -32,6 +32,39 @@ def link_label(url: str) -> str:
     return url.replace("https://", "").replace("http://", "")
 
 
+def to_item(comment: Comment, source: Source, post: Post, snippet: str) -> dict:
+    """Единый вид находки для API, бота и поиска по списку."""
+    return {
+        "id": comment.id,
+        "network": comment.network,
+        "text": comment.text,
+        "snippet": snippet or comment.text,
+        "author_name": comment.author_name,
+        "author_url": comment.author_url,
+        "published_at": comment.published_at,
+        "likes": comment.likes,
+        "url": comment.url,
+        "parent_external_id": comment.parent_external_id,
+        "verdict": comment.verdict,
+        "rubric": comment.rubric,
+        "rationale": comment.rationale,
+        "score": comment.risk_score,
+        "source": {
+            "id": source.id,
+            "title": source.title,
+            "handle": source.handle,
+            "network": source.network,
+            "avatar_url": source.avatar_url,
+        },
+        "post": {
+            "id": post.id,
+            "text": post.text,
+            "url": post.url,
+            "published_at": post.published_at,
+        },
+    }
+
+
 def comment_card(
     comment: Comment,
     source: Source,

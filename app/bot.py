@@ -20,6 +20,7 @@ from aiogram.types import (
 from app.config import get_settings
 from app.db import SessionLocal
 from app.models import Watch
+from app.services.identifiers import lookup_identifiers
 from app.services.ingest import IncomingComment, ensure_chat_source, ingest_telegram_message
 from app.services.present import card_from_item
 from app.services.rubrics import get_rubric_set
@@ -50,6 +51,7 @@ WELCOME = (
     "/app — открыть приложение кнопкой\n"
     "/diag — проверить настройку\n"
     "/find &lt;запрос&gt; — обычный поиск, например <code>/find блокировка</code>\n"
+    "/check &lt;список&gt; — @ник, id или телефон, через запятую\n"
     "/art &lt;статья&gt; — находки по статье, например <code>/art 205.2</code>\n"
     "/csv &lt;запрос&gt; — выгрузка в таблицу\n"
     "/add &lt;слово&gt; — присылать новые сообщения с этим словом\n"
@@ -146,6 +148,40 @@ async def cmd_art(message: Message, command: CommandObject) -> None:
     code = args[0].strip().upper()
     query = args[1].strip() if len(args) > 1 else ""
     await _search(message, query, rubric=code, empty_ok=True)
+
+
+@router.message(Command("check"))
+async def cmd_check(message: Message, command: CommandObject) -> None:
+    """Список @юзернеймов, id и телефонов — один ответ на все записи."""
+    raw = (command.args or "").strip()
+    if not raw:
+        await message.answer(
+            "Пришлите список — по одному в строке или через запятую:\n"
+            "<code>@ivan_petrov, 123456789, +7 999 123-45-67</code>"
+        )
+        return
+
+    async with SessionLocal() as session:
+        user = await _ensure_user(session, message)
+        if user is None:
+            return
+        result = await lookup_identifiers(session, user.id, [raw])
+
+    if not result["groups"]:
+        unknown = ", ".join(result["unknown"]) or "пусто"
+        await message.answer(f"Не разобрал: {html_escape(unknown)}")
+        return
+
+    parts = [f"<b>Записей:</b> {len(result['groups'])}"]
+    for group in result["groups"]:
+        parts.append(f"\n<b>{html_escape(group['raw'])}</b> — {group['total']}")
+        for item in group["items"][:2]:
+            parts.append(card_from_item(item, limit=160))
+        rest = group["total"] - min(2, len(group["items"]))
+        if rest > 0:
+            parts.append(f"ещё {rest} — в приложении")
+
+    await message.answer("\n".join(parts)[:4000], reply_markup=chat_keyboard(message.chat.type))
 
 
 @router.message(Command("csv"))
@@ -538,6 +574,7 @@ def create_dispatcher() -> Dispatcher:
 BOT_COMMANDS = [
     BotCommand(command="app", description="Открыть приложение"),
     BotCommand(command="find", description="Найти комментарии"),
+    BotCommand(command="check", description="Проверить список @, id, телефонов"),
     BotCommand(command="art", description="Находки по статье УК"),
     BotCommand(command="scan", description="Обойти группы аккаунтов"),
     BotCommand(command="acc", description="Аккаунты и группы"),

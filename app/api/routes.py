@@ -14,6 +14,9 @@ from app.api.deps import CurrentUser, SessionDep
 from app.config import get_settings
 from app.models import Network, Source, Watch
 from app.schemas import (
+    IdentifierGroupOut,
+    LookupIn,
+    LookupOut,
     MeOut,
     NetworkCapability,
     ResolvedSource,
@@ -27,6 +30,7 @@ from app.schemas import (
     WatchCreateIn,
     WatchOut,
 )
+from app.services.identifiers import lookup_identifiers
 from app.services.rubrics import get_rubric_set
 from app.services.search import (
     SearchParams,
@@ -247,6 +251,18 @@ async def search(
     )
     result = await search_comments(session, user.id, params)
     return SearchOut(**result)
+
+
+@router.post("/lookup", response_model=LookupOut)
+async def lookup(payload: LookupIn, user: CurrentUser, session: SessionDep) -> LookupOut:
+    """Список @юзернеймов, id и телефонов — за один запрос, без выбора типа."""
+    result = await lookup_identifiers(session, user.id, payload.identifiers)
+    return LookupOut(
+        groups=[IdentifierGroupOut(**group) for group in result["groups"]],
+        unknown=result["unknown"],
+        total=result["total"],
+        took_ms=result["took_ms"],
+    )
 
 
 @router.get("/search.csv")

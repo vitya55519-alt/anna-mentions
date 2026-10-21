@@ -43,6 +43,19 @@
         </div>
       </section>
 
+      <section class="view hidden" id="view-lookup">
+        <div class="section-head"><h2>Проверка списка</h2></div>
+        <p class="hint">
+          По одному в строке или через запятую: <code>@username</code>, id (<code>123456789</code>),
+          телефон (<code>+7 999 123-45-67</code>). До 10 штук — тип определяется сам.
+        </p>
+        <textarea class="lookup-input" id="lookup-input" rows="6" spellcheck="false"
+          placeholder="@ivan_petrov&#10;123456789&#10;+7 999 123-45-67"></textarea>
+        <button class="primary wide" id="btn-lookup" type="button">Проверить</button>
+        <div class="status" id="lookup-status"></div>
+        <div class="results" id="lookup-results"></div>
+      </section>
+
       <section class="view hidden" id="view-sources">
         <div class="section-head">
           <h2>Источники</h2>
@@ -65,6 +78,7 @@
 
     <nav class="tabbar" id="tabbar">
       <button class="tab active" data-view="search" type="button">Поиск</button>
+      <button class="tab" data-view="lookup" type="button">Список</button>
       <button class="tab" data-view="sources" type="button">Источники</button>
       <button class="tab" data-view="words" type="button">Слова</button>
     </nav>
