@@ -60,6 +60,9 @@ async def init_db() -> None:
     from app import models  # noqa: F401  (нужно для регистрации метаданных)
 
     async with engine.begin() as conn:
+        # web и worker стартуют одновременно: блокировка не даёт им создавать одни
+        # и те же таблицы параллельно (иначе Postgres отдаёт duplicate key pg_type).
+        await conn.execute(text("SELECT pg_advisory_xact_lock(727001)"))
         await conn.run_sync(Base.metadata.create_all)
         # create_all не трогает уже существующие таблицы — доводим схему руками.
         await conn.execute(
