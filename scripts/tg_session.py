@@ -33,7 +33,8 @@ async def login(index: int, api_id: int, api_hash: str) -> str:
         phone = input("Номер телефона аккаунта (формат +7...): ").strip()
 
     client = TelegramClient(StringSession(), api_id, api_hash)
-    await client.start(phone=phone)
+    password = input("Пароль 2FA, если включён (ввод отображается; нет — просто Enter): ")
+    await client.start(phone=phone, password=password or None)
     try:
         me = await client.get_me()
         name = " ".join(part for part in (me.first_name, me.last_name) if part) or "без имени"
