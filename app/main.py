@@ -73,6 +73,12 @@ async def health() -> HealthOut:
     return HealthOut(status="ok", version=__version__)
 
 
+@app.get("/healthz", include_in_schema=False)
+async def healthz() -> HealthOut:
+    """Healthcheck-путь Railway: платформа опрашивает /healthz, а не /api/health."""
+    return HealthOut(status="ok", version=__version__)
+
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
