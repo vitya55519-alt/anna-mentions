@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY static ./static
 COPY rubrics ./rubrics
+COPY scripts ./scripts
 COPY start.sh ./
 RUN chmod +x start.sh
 
