@@ -48,8 +48,13 @@ async def login(index: int, api_id: int, api_hash: str) -> str:
             print(f"Отправляю код на {phone}")
 
     client = TelegramClient(StringSession(), api_id, api_hash)
-    password = input("Пароль 2FA, если включён (ввод отображается; нет — просто Enter): ")
-    await client.start(phone=phone, password=password or None)
+    password = input("Пароль 2FA, если включён (ввод отображается; нет — просто Enter): ").strip()
+    if password:
+        await client.start(phone=phone, password=password)
+    else:
+        print("Пароль не введён. Если включена двухэтапная проверка, будет вопрос")
+        print("'Please enter your password:' — ввод скрытый, наберите пароль и Enter.")
+        await client.start(phone=phone)
     try:
         me = await client.get_me()
         name = " ".join(part for part in (me.first_name, me.last_name) if part) or "без имени"
