@@ -28,10 +28,12 @@ MAX_ACCOUNTS = 5
 
 async def login(index: int, api_id: int, api_hash: str) -> str:
     print(f"\n--- Аккаунт {index} ---")
-    input("Войдите под нужным номером и нажмите Enter, чтобы начать: ")
+    phone = ""
+    while not phone:
+        phone = input("Номер телефона аккаунта (формат +7...): ").strip()
 
     client = TelegramClient(StringSession(), api_id, api_hash)
-    await client.start()
+    await client.start(phone=phone)
     try:
         me = await client.get_me()
         name = " ".join(part for part in (me.first_name, me.last_name) if part) or "без имени"
