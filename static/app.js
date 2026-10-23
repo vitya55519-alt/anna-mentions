@@ -49,6 +49,9 @@ const el = {
   joinStatus: $("join-status"),
   joinList: $("join-list"),
   joinSummary: $("join-panel")?.querySelector("summary"),
+  publicBtn: $("btn-public"),
+  publicStatus: $("public-status"),
+  publicResults: $("public-results"),
   accountsList: $("accounts-list"),
   accountsSummary: $("accounts-panel")?.querySelector("summary"),
   accountSheet: $("account-sheet"),
@@ -879,6 +882,56 @@ async function downloadCsv() {
   }
 }
 
+function publicItemHtml(item) {
+  const text = item.text.length > 360 ? `${item.text.slice(0, 360)}…` : item.text;
+  const channel = safeUrl(item.channel_url || item.url);
+  const date = item.date ? String(item.date).slice(0, 10) : "";
+  return `<article class="card">
+    <div class="card-head">
+      <span class="badge pending">канал</span>
+      <span class="verdict pending">${esc(item.channel)}</span>
+      <span class="spacer"></span>
+      <span class="date">${esc(date)}</span>
+    </div>
+    <p class="quote">${esc(text)}</p>
+    <div class="card-foot">
+      <a href="${esc(safeUrl(item.url))}" data-link>открыть пост</a>
+      <span class="spacer"></span>
+      <a class="chat-link" href="${esc(channel)}" data-link>канал: ${esc(item.channel)}</a>
+    </div>
+  </article>`;
+}
+
+async function runPublicSearch() {
+  const query = (el.q.value || state.q || "").trim();
+  if (query.length < 2) {
+    toast("Сначала напишите ник или текст в строке поиска");
+    return;
+  }
+  el.publicBtn.disabled = true;
+  el.publicStatus.textContent = "Ищу в публичных каналах…";
+  el.publicResults.innerHTML = "";
+  try {
+    const data = await api("/api/public-search", {
+      method: "POST",
+      body: JSON.stringify({ query, limit: 10 }),
+    });
+    if (data.error && !data.items.length) {
+      el.publicStatus.textContent = data.error;
+      return;
+    }
+    el.publicStatus.textContent = `Проверено постов: ${data.checked} · найдено: ${data.items.length}`;
+    el.publicResults.innerHTML = data.items.length
+      ? data.items.map(publicItemHtml).join("")
+      : `<p class="muted">В публичных каналах ничего не нашлось.</p>`;
+  } catch (error) {
+    el.publicStatus.textContent = "";
+    el.publicResults.innerHTML = `<p class="muted">${esc(error.message)}</p>`;
+  } finally {
+    el.publicBtn.disabled = false;
+  }
+}
+
 function switchView(name) {
   document.querySelectorAll(".view").forEach((view) => {
     view.classList.toggle("hidden", view.id !== `view-${name}`);
@@ -950,6 +1003,7 @@ function bindUi() {
 
   $("btn-source-save").addEventListener("click", addSource);
   el.joinBtn.addEventListener("click", importJoins);
+  el.publicBtn.addEventListener("click", runPublicSearch);
   el.joinList.addEventListener("click", handleJoinAction);
   el.addToChat.addEventListener("click", addBotToChat);
   el.sources.addEventListener("click", handleSourceAction);

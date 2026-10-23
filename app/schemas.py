@@ -264,3 +264,24 @@ class NetworkCapability(BaseModel):
 class HealthOut(BaseModel):
     status: str
     version: str
+
+
+class PublicSearchIn(BaseModel):
+    query: str = Field(min_length=2, max_length=200)
+    limit: int = Field(default=10, ge=1, le=30)
+
+
+class PublicItemOut(BaseModel):
+    url: str
+    channel: str
+    channel_url: str = ""
+    text: str
+    date: str = ""
+
+
+class PublicSearchOut(BaseModel):
+    query: str
+    engine_query: str = ""
+    items: list[PublicItemOut] = Field(default_factory=list)
+    checked: int = 0
+    error: str = ""

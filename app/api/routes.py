@@ -23,6 +23,8 @@ from app.schemas import (
     LookupOut,
     MeOut,
     NetworkCapability,
+    PublicSearchIn,
+    PublicSearchOut,
     ResolvedSource,
     RubricOut,
     SearchOut,
@@ -42,6 +44,7 @@ from app.schemas import (
 )
 from app.services import tg_login
 from app.services.identifiers import lookup_identifiers
+from app.services.public_search import search_public
 from app.services.join_queue import (
     cancel_join_task,
     enqueue_join_tasks,
@@ -432,6 +435,13 @@ async def search(
     )
     result = await search_comments(session, user.id, params)
     return SearchOut(**result)
+
+
+@router.post("/public-search", response_model=PublicSearchOut)
+async def public_search(payload: PublicSearchIn, user: CurrentUser) -> PublicSearchOut:
+    """Поиск по публичным каналам: посты, а не комментарии."""
+    data = await search_public(payload.query, payload.limit)
+    return PublicSearchOut(**data)
 
 
 @router.post("/lookup", response_model=LookupOut)

@@ -42,6 +42,19 @@
           <button class="link-btn" id="btn-sort" type="button">сортировка: по точности</button>
           <button class="link-btn" id="btn-csv" type="button">экспорт /csv</button>
         </div>
+
+        <details class="join-panel" id="public-panel">
+          <summary>Поиск по публичным каналам</summary>
+          <p class="hint">
+            Ищет посты в публичных каналах Телеграма, где встречается ваш запрос —
+            даже в тех, где вы не состоите. Сейчас в строке поиска: ник или текст.
+            Важно: это сами посты каналов. Комментарии под постами в интернете
+            не видны — их читает основной сканер.
+          </p>
+          <button class="primary wide" id="btn-public" type="button">Искать в каналах</button>
+          <div class="status" id="public-status"></div>
+          <div class="list" id="public-results"></div>
+        </details>
       </section>
 
       <section class="view hidden" id="view-lookup">

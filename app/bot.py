@@ -23,6 +23,7 @@ from app.models import Watch
 from app.services.identifiers import lookup_identifiers
 from app.services.ingest import IncomingComment, ensure_chat_source, ingest_telegram_message
 from app.services.present import card_from_item
+from app.services.public_search import search_public
 from app.services.rubrics import get_rubric_set
 from app.services.search import (
     SearchParams,
@@ -148,6 +149,41 @@ async def cmd_art(message: Message, command: CommandObject) -> None:
     code = args[0].strip().upper()
     query = args[1].strip() if len(args) > 1 else ""
     await _search(message, query, rubric=code, empty_ok=True)
+
+
+@router.message(Command("web"))
+async def cmd_web(message: Message, command: CommandObject) -> None:
+    """Поиск постов в публичных каналах — там, где аккаунт не состоит."""
+    raw = (command.args or "").strip()
+    if len(raw) < 2:
+        await message.answer(
+            "Пришлите ник или текст: <code>/web @ivan_petrov</code>\n"
+            "Ищу посты в публичных каналах. Комментарии под постами в интернете не видны — "
+            "их читает основной сканер."
+        )
+        return
+
+    data = await search_public(raw, limit=5)
+    if data["error"] and not data["items"]:
+        await message.answer(f"Поиск в каналах сейчас недоступен: {html_escape(data['error'])}")
+        return
+    if not data["items"]:
+        await message.answer(
+            f"В публичных каналах ничего не нашёл (проверено постов: {data['checked']})."
+        )
+        return
+
+    parts = [f"<b>Найдено в публичных каналах:</b> {len(data['items'])}"]
+    for item in data["items"]:
+        text = item["text"]
+        if len(text) > 220:
+            text = text[:220] + "…"
+        parts.append(
+            f"\n<b>{html_escape(item['channel'])}</b>\n"
+            f"{html_escape(text)}\n"
+            f"<a href=\"{item['url']}\">открыть пост</a>"
+        )
+    await message.answer("\n".join(parts)[:4000], reply_markup=chat_keyboard(message.chat.type))
 
 
 @router.message(Command("check"))
@@ -591,6 +627,7 @@ BOT_COMMANDS = [
     BotCommand(command="app", description="Открыть приложение"),
     BotCommand(command="find", description="Найти комментарии"),
     BotCommand(command="check", description="Проверить список @, id, телефонов"),
+    BotCommand(command="web", description="Поиск в публичных каналах"),
     BotCommand(command="art", description="Находки по статье УК"),
     BotCommand(command="scan", description="Обойти группы аккаунтов"),
     BotCommand(command="acc", description="Аккаунты и группы"),

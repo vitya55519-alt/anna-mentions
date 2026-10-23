@@ -37,6 +37,7 @@ from app.services.identifiers import (
 )  # noqa: E402
 from app.services.join_queue import discussion_target, parse_ref, parse_refs  # noqa: E402
 from app.services.present import card_from_item, comment_card, to_item  # noqa: E402
+from app.services.public_search import build_query, needles_for, parse_links  # noqa: E402
 from app.services.rubrics import get_rubric_set  # noqa: E402
 from app.services.search import build_tsquery, relax_tsquery  # noqa: E402
 from app.services.tg_scan import dialog_key  # noqa: E402
@@ -86,6 +87,22 @@ def main() -> int:
     hits = rubric.match("Надо уебать дроном по Кремлю, оправдываю такие удары")
     expect(bool(hits), "спорный текст попал в набор")
     expect(hits[0].score < 0.8, "одного маркера хватает только на «пограничное»")
+
+    check_title("поиск в публичных каналах")
+    expect(build_query("@ivan_petrov") == "@ivan_petrov site:t.me", "ник превращается в запрос по t.me")
+    expect(build_query("https://t.me/chan/123") == "@chan site:t.me", "ссылка на пост — в ник канала")
+    expect(build_query("мойка авто") == '"мойка авто" site:t.me', "текст — в кавычках, чтобы искать фразу")
+    links = parse_links(
+        "[1](https://duckduckgo.com/l/?uddg=https%3A%2F%2Ft.me%2Fchan%2F12&rut=x) "
+        "[2](https://t.me/chan/13)"
+    )
+    expect(links == ["https://t.me/chan/12", "https://t.me/chan/13"], "ссылки достаются и без повторов")
+    expect(
+        parse_links("просто текст без ссылок") == [],
+        "мусор без постов пропускается",
+    )
+    expect(needles_for("@ivan") == ["@ivan"], "ищем ник целиком")
+    expect(needles_for("мойка авто") == ["мойка", "авто"], "текст — по всем словам")
 
     check_title("tsquery")
     query = build_tsquery("блокировка кремль")
