@@ -33,6 +33,8 @@ class Category:
     patterns: tuple[str, ...]
     phrases: tuple[str, ...]
     rationale_hint: str
+    weak_patterns: tuple[str, ...] = ()
+    context_patterns: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +54,8 @@ class RubricSet:
     categories: tuple[Category, ...]
     compiled: dict[str, tuple[re.Pattern[str], ...]]
     phrase_re: dict[str, tuple[re.Pattern[str], ...]]
+    weak_compiled: dict[str, tuple[re.Pattern[str], ...]]
+    context_compiled: dict[str, tuple[re.Pattern[str], ...]]
 
     @property
     def codes(self) -> tuple[str, ...]:
@@ -76,6 +80,17 @@ class RubricSet:
                 if found:
                     markers.append(found.group(0).lower())
 
+            weak: list[str] = []
+            for regex in self.weak_compiled.get(category.code, ()):
+                weak.extend(match.group(0).lower() for match in regex.finditer(normalized))
+            context = any(
+                regex.search(normalized) for regex in self.context_compiled.get(category.code, ())
+            )
+            if not markers and weak and not context:
+                # Слабое слово (например «молодцы») без сильной темы статьи — не считаем.
+                continue
+            markers.extend(weak)
+
             unique = tuple(dict.fromkeys(markers))
             if not unique:
                 continue
@@ -96,9 +111,10 @@ class RubricSet:
 
 
 def _compile_pattern(pattern: str) -> re.Pattern[str]:
-    """`взорв*` → префикс с любым окончанием; слово не должно начинаться с середины другого."""
+    """`взорв*` → префикс с любым окончанием; без `*` — только целое слово."""
     body = re.escape(pattern.strip().lower()).replace(r"\*", r"[\w-]*")
-    return re.compile(rf"(?<!\w){body}", re.UNICODE)
+    tail = "" if pattern.strip().endswith("*") else r"(?!\w)"
+    return re.compile(rf"(?<!\w){body}{tail}", re.UNICODE)
 
 
 def _compile_phrase(phrase: str) -> re.Pattern[str]:
@@ -117,6 +133,8 @@ def load_rubric_set(file_name: str = "uk_rf.json") -> RubricSet:
     categories: list[Category] = []
     compiled: dict[str, tuple[re.Pattern[str], ...]] = {}
     phrase_re: dict[str, tuple[re.Pattern[str], ...]] = {}
+    weak_compiled: dict[str, tuple[re.Pattern[str], ...]] = {}
+    context_compiled: dict[str, tuple[re.Pattern[str], ...]] = {}
 
     for item in raw.get("categories", []):
         code = str(item["code"]).upper()
@@ -128,10 +146,14 @@ def load_rubric_set(file_name: str = "uk_rf.json") -> RubricSet:
             patterns=tuple(item.get("patterns", ())),
             phrases=tuple(item.get("phrases", ())),
             rationale_hint=item.get("rationale_hint", ""),
+            weak_patterns=tuple(item.get("weak_patterns", ())),
+            context_patterns=tuple(item.get("context_patterns", ())),
         )
         categories.append(category)
         compiled[code] = tuple(_compile_pattern(p) for p in category.patterns)
         phrase_re[code] = tuple(_compile_phrase(p) for p in category.phrases)
+        weak_compiled[code] = tuple(_compile_pattern(p) for p in category.weak_patterns)
+        context_compiled[code] = tuple(_compile_pattern(p) for p in category.context_patterns)
 
     return RubricSet(
         id=str(raw.get("id", path.stem)),
@@ -140,6 +162,8 @@ def load_rubric_set(file_name: str = "uk_rf.json") -> RubricSet:
         categories=tuple(categories),
         compiled=compiled,
         phrase_re=phrase_re,
+        weak_compiled=weak_compiled,
+        context_compiled=context_compiled,
     )
 
 
