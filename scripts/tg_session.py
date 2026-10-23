@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 
 from telethon import TelegramClient
@@ -26,11 +27,25 @@ from telethon.sessions import StringSession
 MAX_ACCOUNTS = 5
 
 
+def normalize_phone(raw: str) -> str:
+    """8..., 9... и разный мусор превращает в +7XXXXXXXXXX."""
+    digits = re.sub(r"\D", "", raw)
+    if not digits:
+        return ""
+    if len(digits) == 10:
+        digits = "7" + digits
+    elif len(digits) == 11 and digits.startswith("8"):
+        digits = "7" + digits[1:]
+    return "+" + digits
+
+
 async def login(index: int, api_id: int, api_hash: str) -> str:
     print(f"\n--- Аккаунт {index} ---")
     phone = ""
     while not phone:
-        phone = input("Номер телефона аккаунта (формат +7...): ").strip()
+        phone = normalize_phone(input("Номер телефона аккаунта (можно 8..., 9... или +7...): "))
+        if phone:
+            print(f"Отправляю код на {phone}")
 
     client = TelegramClient(StringSession(), api_id, api_hash)
     password = input("Пароль 2FA, если включён (ввод отображается; нет — просто Enter): ")
