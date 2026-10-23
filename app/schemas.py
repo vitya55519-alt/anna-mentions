@@ -17,6 +17,46 @@ class MeOut(ORMModel):
     username: str | None = None
     # Нужен мини-приложению, чтобы открыть «Добавить бота в чат».
     bot_username: str = ""
+    # Владелец видит вкладку «Источники» с аккаунтами и группами.
+    is_admin: bool = False
+
+
+class TgAccountOut(ORMModel):
+    id: int
+    phone: str
+    tg_id: int | None = None
+    username: str | None = None
+    first_name: str | None = None
+    is_active: bool = True
+    last_error: str | None = None
+    created_at: datetime
+
+
+class TgLoginStartIn(BaseModel):
+    phone: str = Field(min_length=5, max_length=32)
+
+
+class TgLoginStartOut(BaseModel):
+    login_id: str
+    phone: str
+    message: str = ""
+
+
+class TgLoginCodeIn(BaseModel):
+    login_id: str = Field(min_length=8, max_length=64)
+    code: str = Field(min_length=1, max_length=16)
+
+
+class TgLoginPasswordIn(BaseModel):
+    login_id: str = Field(min_length=8, max_length=64)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class TgLoginOut(BaseModel):
+    # done — аккаунт добавлен; password — нужен облачный пароль.
+    status: str
+    message: str = ""
+    account: TgAccountOut | None = None
 
 
 class UserOut(ORMModel):

@@ -12,6 +12,8 @@ const state = {
   rubrics: [],
   caps: [],
   botUsername: "",
+  isAdmin: false,
+  accLoginId: "",
   loading: false,
 };
 
@@ -47,6 +49,16 @@ const el = {
   joinStatus: $("join-status"),
   joinList: $("join-list"),
   joinSummary: $("join-panel")?.querySelector("summary"),
+  accountsList: $("accounts-list"),
+  accountsSummary: $("accounts-panel")?.querySelector("summary"),
+  accountSheet: $("account-sheet"),
+  accStepPhone: $("acc-step-phone"),
+  accStepCode: $("acc-step-code"),
+  accStepPassword: $("acc-step-password"),
+  accPhone: $("acc-phone"),
+  accCode: $("acc-code"),
+  accPassword: $("acc-password"),
+  accStatus: $("acc-status"),
 };
 
 const KINDS = {
@@ -342,8 +354,24 @@ async function loadMe() {
   try {
     const me = await api("/api/me");
     state.botUsername = me.bot_username || "";
+    state.isAdmin = Boolean(me.is_admin);
   } catch {
     state.botUsername = "";
+    state.isAdmin = false;
+  }
+  applyAdminVisibility();
+}
+
+function applyAdminVisibility() {
+  // Вкладку «Источники» с аккаунтами и группами видит только владелец.
+  const tab = document.querySelector('.tab[data-view="sources"]');
+  if (tab) tab.classList.toggle("hidden", !state.isAdmin);
+  if (!state.isAdmin) {
+    document.querySelectorAll(".view").forEach((view) => {
+      if (view.id === "view-sources" && !view.classList.contains("hidden")) {
+        switchView("search");
+      }
+    });
   }
 }
 
@@ -540,6 +568,173 @@ async function handleJoinAction(event) {
   }
 }
 
+// --- Админка: аккаунты -------------------------------------------------------
+
+function accountHtml(account) {
+  const name = [account.first_name, account.username ? `@${account.username}` : ""]
+    .filter(Boolean)
+    .join(" ");
+  const label = name || `id ${account.tg_id || "—"}`;
+  const error = account.last_error
+    ? `<div class="source-error">${esc(account.last_error)}</div>`
+    : "";
+  return `<div class="source">
+    <div class="source-top">
+      <div class="avatar">TG</div>
+      <div class="source-title">
+        <strong>${esc(label)}</strong>
+        <span>${esc(account.phone)} · добавлен ${fmtDate(account.created_at)}</span>
+      </div>
+      <span class="badge ${account.is_active ? "" : "clean"}">${
+        account.is_active ? "работает" : "выключен"
+      }</span>
+    </div>
+    ${error}
+    <div class="source-actions">
+      <button class="danger" data-acc-delete="${account.id}">Удалить</button>
+    </div>
+  </div>`;
+}
+
+async function loadAccounts() {
+  if (!state.isAdmin) return;
+  try {
+    const accounts = await api("/api/admin/tg");
+    if (el.accountsSummary) {
+      el.accountsSummary.textContent = `Аккаунты · ${accounts.length}`;
+    }
+    el.accountsList.innerHTML = accounts.length
+      ? accounts.map(accountHtml).join("")
+      : `<p class="muted">Пока ни одного аккаунта — добавьте первый ниже.</p>`;
+  } catch (error) {
+    el.accountsList.innerHTML = `<p class="muted">${esc(error.message)}</p>`;
+  }
+}
+
+function openAccountSheet() {
+  state.accLoginId = "";
+  el.accPhone.value = "";
+  el.accCode.value = "";
+  el.accPassword.value = "";
+  el.accStatus.textContent = "";
+  el.accStepPhone.classList.remove("hidden");
+  el.accStepCode.classList.add("hidden");
+  el.accStepPassword.classList.add("hidden");
+  el.accountSheet.classList.remove("hidden");
+  el.accPhone.focus({ preventScroll: true });
+}
+
+function closeAccountSheet() {
+  el.accountSheet.classList.add("hidden");
+}
+
+async function accSendCode() {
+  const phone = el.accPhone.value.trim();
+  if (!phone) {
+    toast("Введите номер телефона");
+    return;
+  }
+  const button = $("btn-acc-phone");
+  button.disabled = true;
+  el.accStatus.textContent = "Отправляю код…";
+  try {
+    const result = await api("/api/admin/tg/start", {
+      method: "POST",
+      body: JSON.stringify({ phone }),
+    });
+    state.accLoginId = result.login_id;
+    el.accStepPhone.classList.add("hidden");
+    el.accStepCode.classList.remove("hidden");
+    el.accStatus.textContent = result.message || "Код отправлен";
+    el.accCode.focus({ preventScroll: true });
+    haptic("medium");
+  } catch (error) {
+    el.accStatus.textContent = "";
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function accSubmitCode() {
+  const code = el.accCode.value.trim();
+  if (!code) {
+    toast("Введите код из Telegram");
+    return;
+  }
+  const button = $("btn-acc-code");
+  button.disabled = true;
+  el.accStatus.textContent = "Проверяю код…";
+  try {
+    const result = await api("/api/admin/tg/code", {
+      method: "POST",
+      body: JSON.stringify({ login_id: state.accLoginId, code }),
+    });
+    if (result.status === "password") {
+      el.accStepCode.classList.add("hidden");
+      el.accStepPassword.classList.remove("hidden");
+      el.accStatus.textContent = result.message;
+      el.accPassword.focus({ preventScroll: true });
+      return;
+    }
+    accDone(result);
+  } catch (error) {
+    el.accStatus.textContent = "";
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function accSubmitPassword() {
+  const password = el.accPassword.value;
+  if (!password) {
+    toast("Введите пароль");
+    return;
+  }
+  const button = $("btn-acc-password");
+  button.disabled = true;
+  el.accStatus.textContent = "Проверяю пароль…";
+  try {
+    const result = await api("/api/admin/tg/password", {
+      method: "POST",
+      body: JSON.stringify({ login_id: state.accLoginId, password }),
+    });
+    accDone(result);
+  } catch (error) {
+    el.accStatus.textContent = "";
+    toast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function accDone(result) {
+  const who = result.account
+    ? [result.account.first_name, result.account.username ? `@${result.account.username}` : ""]
+        .filter(Boolean)
+        .join(" ")
+    : "аккаунт";
+  el.accStatus.textContent = result.message || "Аккаунт подключён";
+  toast(`Подключён: ${who}`);
+  haptic("medium");
+  setTimeout(closeAccountSheet, 900);
+  await loadAccounts();
+}
+
+async function handleAccountAction(event) {
+  const button = event.target.closest("[data-acc-delete]");
+  if (!button) return;
+  try {
+    await api(`/api/admin/tg/${button.dataset.accDelete}`, { method: "DELETE" });
+    toast("Аккаунт удалён");
+    await loadAccounts();
+    haptic();
+  } catch (error) {
+    toast(error.message);
+  }
+}
+
 async function handleSourceAction(event) {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
@@ -583,18 +778,33 @@ async function addSource() {
   button.textContent = "Проверяю…";
 
   try {
-    const resolved = await api("/api/sources/resolve", {
-      method: "POST",
-      body: JSON.stringify({ ref }),
-    });
-    await api("/api/sources", {
-      method: "POST",
-      body: JSON.stringify({ network: resolved.network, ref }),
-    });
-    el.sheet.classList.add("hidden");
-    el.sheetInput.value = "";
-    toast(`Добавлено: ${resolved.title}`);
-    await loadSources();
+    const isTelegram = /t\.me|telegram\.me|^@/i.test(ref);
+    if (isTelegram) {
+      // Telegram-ссылки вступают в очередь: аккаунт сам зайдёт в чат.
+      const result = await api("/api/sources/import", {
+        method: "POST",
+        body: JSON.stringify({ text: ref }),
+      });
+      el.sheet.classList.add("hidden");
+      el.sheetInput.value = "";
+      const parts = [`В очереди: ${result.queued}`];
+      if (result.skipped) parts.push(`пропущено: ${result.skipped}`);
+      toast(parts.join(" · ") || "Поставлено в очередь");
+      await loadJoins();
+    } else {
+      const resolved = await api("/api/sources/resolve", {
+        method: "POST",
+        body: JSON.stringify({ ref }),
+      });
+      await api("/api/sources", {
+        method: "POST",
+        body: JSON.stringify({ network: resolved.network, ref }),
+      });
+      el.sheet.classList.add("hidden");
+      el.sheetInput.value = "";
+      toast(`Добавлено: ${resolved.title}`);
+      await loadSources();
+    }
     haptic("medium");
   } catch (error) {
     toast(error.message);
@@ -676,7 +886,10 @@ function switchView(name) {
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.view === name);
   });
-  if (name === "sources") loadJoins();
+  if (name === "sources") {
+    loadJoins();
+    loadAccounts();
+  }
   haptic();
 }
 
@@ -716,7 +929,7 @@ function bindUi() {
     if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) runLookup();
   });
   $("btn-refresh").addEventListener("click", async () => {
-    await Promise.all([loadStats(), loadSources(), loadJoins()]);
+    await Promise.all([loadStats(), loadSources(), loadJoins(), loadAccounts()]);
     await runSearch(true);
     toast("Обновлено");
   });
@@ -740,6 +953,20 @@ function bindUi() {
   el.joinList.addEventListener("click", handleJoinAction);
   el.addToChat.addEventListener("click", addBotToChat);
   el.sources.addEventListener("click", handleSourceAction);
+  el.accountsList.addEventListener("click", handleAccountAction);
+  $("btn-add-account").addEventListener("click", openAccountSheet);
+  $("btn-acc-phone").addEventListener("click", accSendCode);
+  $("btn-acc-code").addEventListener("click", accSubmitCode);
+  $("btn-acc-password").addEventListener("click", accSubmitPassword);
+  el.accCode.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") accSubmitCode();
+  });
+  el.accPassword.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") accSubmitPassword();
+  });
+  el.accountSheet.addEventListener("click", (event) => {
+    if (event.target.closest("[data-close-sheet]")) closeAccountSheet();
+  });
   el.watchForm.addEventListener("submit", addWatch);
 
   el.watches.addEventListener("click", async (event) => {
@@ -782,7 +1009,14 @@ async function boot() {
   await Promise.all([loadRubrics(), loadCaps(), loadMe()]);
   renderChips(null);
   renderSortLabel();
-  await Promise.all([loadStats(), runSearch(true), loadSources(), loadWatches(), loadJoins()]);
+  await Promise.all([
+    loadStats(),
+    runSearch(true),
+    loadSources(),
+    loadWatches(),
+    loadJoins(),
+    loadAccounts(),
+  ]);
 }
 
 boot();

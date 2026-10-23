@@ -23,6 +23,7 @@ logger = logging.getLogger("app.worker")
 
 async def crawl_cycle(bot: Bot | None, pool: AccountPool, limit: int = 2) -> int:
     settings = get_settings()
+    await pool.refresh()
     async with SessionLocal() as session:
         sources = await claim_due_sources(session, limit=limit)
         processed = 0
@@ -94,6 +95,7 @@ async def join_loop(pool: AccountPool, stop: asyncio.Event) -> None:
     while not stop.is_set():
         processed = 0
         try:
+            await pool.refresh()
             processed = await process_join_tasks(settings, pool)
         except Exception:  # noqa: BLE001 — цикл не должен умирать
             logger.exception("Сбой очереди вступления")
@@ -117,6 +119,8 @@ async def main() -> None:
     joining: asyncio.Task | None = None
     pool = get_pool(settings)
     stop = asyncio.Event()
+    # Аккаунты, добавленные через админку, лежат в базе: подхватываем до старта циклов.
+    await pool.refresh(force=True)
 
     if settings.tg_scan_enabled and pool.ready():
         logger.info("Аккаунтов-сборщиков: %s", len(pool.accounts))

@@ -208,6 +208,26 @@ class JoinTask(Base):
     )
 
 
+class TgAccount(Base):
+    """Аккаунт-сборщик, добавленный через админку: строка сессии Telethon."""
+
+    __tablename__ = "tg_accounts"
+    __table_args__ = (Index("ix_tg_accounts_active", "is_active"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    phone: Mapped[str] = mapped_column(String(32), unique=True)
+    tg_id: Mapped[int | None] = mapped_column(BigInteger, index=True)
+    username: Mapped[str | None] = mapped_column(String(64))
+    first_name: Mapped[str | None] = mapped_column(String(128))
+    session: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
 class CrawlRun(Base):
     __tablename__ = "crawl_runs"
 

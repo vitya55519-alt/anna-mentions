@@ -3,16 +3,17 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from typing import Annotated
 
 from aiogram import Bot
-from fastapi import APIRouter, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.adapters import AdapterError, capabilities, get_adapter
 from app.api.deps import CurrentUser, SessionDep
 from app.config import get_settings
-from app.models import Network, Source, Watch
+from app.models import Network, Source, TgAccount, User, Watch
 from app.schemas import (
     IdentifierGroupOut,
     JoinImportIn,
@@ -30,9 +31,16 @@ from app.schemas import (
     SourcePatchIn,
     SourceResolveIn,
     StatsOut,
+    TgAccountOut,
+    TgLoginCodeIn,
+    TgLoginOut,
+    TgLoginPasswordIn,
+    TgLoginStartIn,
+    TgLoginStartOut,
     WatchCreateIn,
     WatchOut,
 )
+from app.services import tg_login
 from app.services.identifiers import lookup_identifiers
 from app.services.join_queue import (
     cancel_join_task,
@@ -46,6 +54,7 @@ from app.services.search import (
     export_csv,
     search_comments,
 )
+from app.services.tg_accounts import get_pool
 from app.services.tg_scan import resolve_owner
 
 router = APIRouter(prefix="/api")
@@ -87,13 +96,29 @@ def _source_out(source: Source) -> SourceOut:
     return data
 
 
+async def require_owner(user: CurrentUser, session: SessionDep) -> User:
+    """Админка: вкладка «Источники», аккаунты и группы — только для владельца."""
+    owner = await resolve_owner(session, get_settings())
+    if owner is None or owner.id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Панель доступна только владельцу",
+        )
+    return user
+
+
+OwnerUser = Annotated[User, Depends(require_owner)]
+
+
 @router.get("/me", response_model=MeOut)
-async def me(user: CurrentUser) -> MeOut:
+async def me(user: CurrentUser, session: SessionDep) -> MeOut:
+    owner = await resolve_owner(session, get_settings())
     return MeOut(
         telegram_id=user.telegram_id,
         first_name=user.first_name,
         username=user.username,
         bot_username=await _bot_username(),
+        is_admin=bool(owner is not None and owner.id == user.id),
     )
 
 
@@ -149,10 +174,12 @@ async def import_sources(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Массовое подключение выключено: JOIN_QUEUE_ENABLED=false",
         )
-    if not settings.tg_accounts_ready:
+    pool = get_pool()
+    await pool.refresh()
+    if not pool.ready():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Нужны аккаунты-сборщики: TG_API_ID, TG_API_HASH и TG_SESSION_1..3",
+            detail="Сначала добавьте аккаунт в админке («Источники» → «Аккаунты»)",
         )
     owner = await resolve_owner(session, settings)
     if owner is not None and owner.id != user.id:
@@ -176,7 +203,7 @@ async def import_status(user: CurrentUser, session: SessionDep) -> JoinQueueOut:
     return JoinQueueOut(
         **snapshot,
         daily_limit=settings.join_daily_limit,
-        accounts=len(settings.tg_sessions) if settings.tg_accounts_ready else 0,
+        accounts=len(get_pool().accounts) if get_pool().ready() else 0,
     )
 
 
@@ -187,6 +214,97 @@ async def cancel_import(task_id: int, user: CurrentUser, session: SessionDep) ->
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Задача не найдена или уже выполняется",
         )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- Админка: аккаунты-сборщики и группы -------------------------------------
+
+
+@router.get("/admin/tg", response_model=list[TgAccountOut])
+async def admin_accounts(_: OwnerUser, session: SessionDep) -> list[TgAccountOut]:
+    rows = (
+        await session.execute(select(TgAccount).order_by(TgAccount.id))
+    ).scalars()
+    return [TgAccountOut.model_validate(row) for row in rows]
+
+
+@router.post("/admin/tg/start", response_model=TgLoginStartOut)
+async def admin_tg_start(payload: TgLoginStartIn, _: OwnerUser) -> TgLoginStartOut:
+    """Шаг 1: отправляет код из Telegram на указанный номер."""
+    try:
+        result = await tg_login.start_login(get_settings(), payload.phone)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 — FloodWait и прочие ответы Telegram
+        logger.warning("Админка: код на %s не отправился: %s", payload.phone, exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Telegram не отправил код: {exc}",
+        ) from exc
+    return TgLoginStartOut(
+        login_id=result["login_id"],
+        phone=result["phone"],
+        message=f"Код отправлен на {result['phone']}",
+    )
+
+
+@router.post("/admin/tg/code", response_model=TgLoginOut)
+async def admin_tg_code(payload: TgLoginCodeIn, _: OwnerUser) -> TgLoginOut:
+    """Шаг 2: код из Telegram. Отвечает status=password, если включена 2FA."""
+    try:
+        result = await tg_login.submit_code(payload.login_id, payload.code)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Админка: код не принят: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Telegram отклонил код: {exc}",
+        ) from exc
+
+    if result["status"] == "password":
+        return TgLoginOut(status="password", message="Введите облачный пароль (двухэтапная проверка)")
+    return TgLoginOut(
+        status="done",
+        account=TgAccountOut.model_validate(result["account"]),
+        message="Аккаунт подключён",
+    )
+
+
+@router.post("/admin/tg/password", response_model=TgLoginOut)
+async def admin_tg_password(payload: TgLoginPasswordIn, _: OwnerUser) -> TgLoginOut:
+    """Шаг 3: облачный пароль, если двухэтапная проверка включена."""
+    try:
+        result = await tg_login.submit_password(payload.login_id, payload.password)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Админка: пароль не принят: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Telegram отклонил пароль: {exc}",
+        ) from exc
+    return TgLoginOut(
+        status="done",
+        account=TgAccountOut.model_validate(result["account"]),
+        message="Аккаунт подключён",
+    )
+
+
+@router.delete("/admin/tg/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def admin_tg_delete(account_id: int, _: OwnerUser, session: SessionDep) -> Response:
+    account = await session.get(TgAccount, account_id)
+    if account is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Аккаунт не найден")
+    await session.delete(account)
+    await session.commit()
+    # Воркер увидит пропажу при следующем обновлении пула и отключит клиента.
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

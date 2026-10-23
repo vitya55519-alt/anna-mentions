@@ -63,6 +63,18 @@
           <h2>Источники</h2>
           <button class="primary small" id="btn-add-source" type="button">Добавить</button>
         </div>
+
+        <details class="join-panel" id="accounts-panel" open>
+          <summary>Аккаунты</summary>
+          <p class="hint">
+            Аккаунт — ваш профиль Telegram, через который сканер читает группы.
+            Добавьте номер, введите код из Telegram и облачный пароль, если спросит.
+            Сессия хранится на сервере и никуда не передаётся.
+          </p>
+          <div class="list" id="accounts-list"></div>
+          <button class="primary wide" id="btn-add-account" type="button">Добавить аккаунт</button>
+        </details>
+
         <details class="join-panel" id="join-panel">
           <summary>Массовое подключение</summary>
           <p class="hint">
@@ -111,6 +123,36 @@
       <div class="sheet-actions">
         <button class="ghost" type="button" data-close>Отмена</button>
         <button class="primary" id="btn-source-save" type="button">Добавить</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet hidden" id="account-sheet">
+    <div class="sheet-backdrop" data-close-sheet></div>
+    <div class="sheet-card">
+      <h2>Новый аккаунт</h2>
+
+      <div id="acc-step-phone">
+        <p class="hint">Шаг 1 — номер телефона аккаунта в любом виде: <code>+7918…</code>, <code>8918…</code>, <code>918…</code>.</p>
+        <input id="acc-phone" inputmode="tel" placeholder="+79181234567" autocomplete="off" />
+        <button class="primary wide" id="btn-acc-phone" type="button">Отправить код</button>
+      </div>
+
+      <div id="acc-step-code" class="hidden">
+        <p class="hint">Шаг 2 — код придёт в Telegram этого аккаунта (или SMS на номер).</p>
+        <input id="acc-code" inputmode="numeric" placeholder="12345" autocomplete="one-time-code" />
+        <button class="primary wide" id="btn-acc-code" type="button">Продолжить</button>
+      </div>
+
+      <div id="acc-step-password" class="hidden">
+        <p class="hint">Шаг 3 — облачный пароль Telegram (двухэтапная проверка).</p>
+        <input id="acc-password" type="password" placeholder="Пароль" autocomplete="off" />
+        <button class="primary wide" id="btn-acc-password" type="button">Войти</button>
+      </div>
+
+      <div class="status" id="acc-status"></div>
+      <div class="sheet-actions">
+        <button class="ghost" type="button" data-close-sheet>Закрыть</button>
       </div>
     </div>
   </div>
